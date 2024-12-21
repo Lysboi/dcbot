@@ -41,6 +41,66 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix=['!', '.'], intents=intents)
 
+# Komut önerilerini kaydet
+@bot.event
+async def on_ready():
+    print(f'Bot {bot.user} olarak giriş yaptı')
+    
+    # Mevcut komutları sil
+    await bot.tree.sync()
+    
+    # Yeni komutları kaydet
+    commands = [
+        discord.app_commands.Command(
+            name="load",
+            description="Kaydedilmiş bir playlist'i yükle",
+            callback=load_playlist
+        ),
+        discord.app_commands.Command(
+            name="save",
+            description="Mevcut sırayı playlist olarak kaydet",
+            callback=save_playlist
+        ),
+        discord.app_commands.Command(
+            name="list",
+            description="Kaydedilmiş playlist'leri göster",
+            callback=list_playlists
+        ),
+        discord.app_commands.Command(
+            name="play",
+            description="Şarkı çal veya sıraya ekle",
+            callback=play
+        ),
+        discord.app_commands.Command(
+            name="queue",
+            description="Sıradaki şarkıları göster",
+            callback=queue
+        ),
+        discord.app_commands.Command(
+            name="now",
+            description="Şu an çalan şarkıyı göster",
+            callback=now_playing
+        ),
+        discord.app_commands.Command(
+            name="lyrics",
+            description="Çalan şarkının sözlerini göster",
+            callback=get_lyrics
+        ),
+        discord.app_commands.Command(
+            name="eq",
+            description="Ekolayzır ayarlarını göster ve düzenle",
+            callback=equalizer
+        )
+    ]
+    
+    # Komutları ekle
+    for command in commands:
+        bot.tree.add_command(command)
+    
+    await bot.tree.sync()
+    print('Komutlar kaydedildi!')
+    print('Bot hazır!')
+
 # Playlist dosyasını yükle
 try:
     with open('playlists.json', 'r', encoding='utf-8') as f:
@@ -250,8 +310,8 @@ async def get_lyrics(ctx):
         await ctx.send("❌ Şu anda çalan bir şarkı yok!")
 
 # Playlist kaydet/yükle
-@bot.command(aliases=['save', 'kaydet'])
-async def save_playlist(ctx, name):
+@bot.hybrid_command(aliases=['save', 'kaydet'], description="Mevcut sırayı playlist olarak kaydet")
+async def save_playlist(ctx, name: str):
     if ctx.guild.id in music_queues and music_queues[ctx.guild.id]:
         if ctx.guild.id not in saved_playlists:
             saved_playlists[ctx.guild.id] = {}
@@ -263,8 +323,8 @@ async def save_playlist(ctx, name):
     else:
         await ctx.send("❌ Sırada şarkı yok!")
 
-@bot.command(aliases=['load', 'yükle'])
-async def load_playlist(ctx, name):
+@bot.hybrid_command(aliases=['load', 'yükle'], description="Kaydedilmiş bir playlist'i yükle")
+async def load_playlist(ctx, name: str):
     if ctx.guild.id in saved_playlists and name in saved_playlists[ctx.guild.id]:
         if ctx.guild.id not in music_queues:
             music_queues[ctx.guild.id] = deque()
@@ -276,7 +336,7 @@ async def load_playlist(ctx, name):
     else:
         await ctx.send(f"❌ '{name}' adlı playlist bulunamadı!")
 
-@bot.command(aliases=['list', 'listele'])
+@bot.hybrid_command(aliases=['list', 'listele'], description="Kaydedilmiş playlist'leri göster")
 async def list_playlists(ctx):
     if ctx.guild.id in saved_playlists and saved_playlists[ctx.guild.id]:
         playlists = list(saved_playlists[ctx.guild.id].keys())
@@ -619,8 +679,8 @@ async def after_song_end(ctx):
         if guild_id in current_urls:
             del current_urls[guild_id]
 
-@bot.command()
-async def play(ctx, *, query):
+@bot.hybrid_command(description="Şarkı çal veya sıraya ekle")
+async def play(ctx, *, query: str):
     if ctx.author.voice is None:
         await ctx.send("Bir sesli kanalda değilsiniz!")
         return
@@ -701,7 +761,7 @@ async def play(ctx, *, query):
     except Exception as e:
         await ctx.send(f'Bir hata oluştu: {str(e)}')
 
-@bot.command()
+@bot.hybrid_command(description="Sıradaki şarkıları göster")
 async def queue(ctx):
     if ctx.guild.id in music_queues and music_queues[ctx.guild.id]:
         queue_list = '\n'.join([f"{i+1}. {url}" for i, url in enumerate(music_queues[ctx.guild.id])])
@@ -709,14 +769,64 @@ async def queue(ctx):
     else:
         await ctx.send("Sırada şarkı yok!")
 
-@bot.command()
-async def clear(ctx):
-    if ctx.guild.id in music_queues:
-        music_queues[ctx.guild.id].clear()
-        await ctx.send("Sıra temizlendi!")
+@bot.hybrid_command(aliases=['now', 'şuan', 'playing', 'np'], description="Şu an çalan şarkıyı göster")
+async def now_playing(ctx):
+    if ctx.guild.id in current_songs and ctx.voice_client and ctx.voice_client.is_playing():
+        title = current_songs[ctx.guild.id]
+        url = current_urls.get(ctx.guild.id, "URL bilgisi yok")
+        embed = discord.Embed(title="🎵 Şu an çalıyor", color=discord.Color.green())
+        embed.add_field(name="Şarkı", value=title, inline=False)
+        embed.add_field(name="Link", value=url, inline=False)
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
 
-# Ekolayzır komutları
-@bot.command(aliases=['eq', 'ekolayzır'])
+@bot.hybrid_command(aliases=['lyrics', 'sözler'], description="Çalan şarkının sözlerini göster")
+async def get_lyrics(ctx):
+    if ctx.guild.id in current_songs:
+        title = current_songs[ctx.guild.id]
+        try:
+            # Şarkı adını temizle
+            title = title.split('(')[0]  # Parantez içindeki kısımları kaldır
+            title = title.split('[')[0]  # Köşeli parantez içindeki kısımları kaldır
+            title = title.split('feat.')[0]  # feat. kısmını kaldır
+            title = title.split('ft.')[0]  # ft. kısmını kaldır
+            title = title.split('Official')[0]  # Official kısmını kaldır
+            title = title.split('Music')[0]  # Music kısmını kaldır
+            title = title.split('Video')[0]  # Video kısmını kaldır
+            title = title.strip()  # Baştaki ve sondaki boşlukları kaldır
+            
+            # Genius'ta ara
+            song = genius.search_song(title)
+            if song:
+                lyrics = song.lyrics
+                # Şarkı sözlerini parçalara böl (Discord mesaj limiti)
+                chunks = [lyrics[i:i+1900] for i in range(0, len(lyrics), 1900)]
+                
+                # İlk embed'e şarkı bilgilerini ekle
+                first_embed = discord.Embed(
+                    title=f"🎵 {song.title}",
+                    description=chunks[0],
+                    color=discord.Color.blue()
+                )
+                first_embed.set_author(name=song.artist)
+                if song.song_art_image_url:
+                    first_embed.set_thumbnail(url=song.song_art_image_url)
+                await ctx.send(embed=first_embed)
+                
+                # Diğer parçaları gönder
+                for chunk in chunks[1:]:
+                    embed = discord.Embed(description=chunk, color=discord.Color.blue())
+                    await ctx.send(embed=embed)
+            else:
+                await ctx.send("❌ Şarkı sözleri bulunamadı!")
+        except Exception as e:
+            print(f"Lyrics error: {str(e)}")  # Hata detayını konsola yazdır
+            await ctx.send(f"❌ Şarkı sözleri alınırken bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
+    else:
+        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
+
+@bot.hybrid_command(aliases=['eq', 'ekolayzır'], description="Ekolayzır ayarlarını göster ve düzenle")
 async def equalizer(ctx, action=None, *args):
     if not ctx.voice_client or not ctx.voice_client.is_playing():
         await ctx.send("❌ Şu anda çalan bir şarkı yok!")
