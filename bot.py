@@ -155,24 +155,9 @@ class VolumeDropdown(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         try:
-            if interaction.guild.voice_client and interaction.guild.voice_client.is_playing():
+            if interaction.guild.voice_client and interaction.guild.voice_client.source:
                 volume = int(self.values[0]) / 100
-                
-                # Mevcut şarkıyı durdur
-                interaction.guild.voice_client.stop()
-                
-                # Şarkıyı yeni ses seviyesiyle tekrar başlat
-                current_song = current_songs.get(interaction.guild.id)
-                if current_song:
-                    FFMPEG_OPTIONS = {
-                        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-                        'options': f'-vn -filter:a volume={volume}'
-                    }
-                    
-                    # Şarkıyı yeni ses seviyesiyle çal
-                    source = await discord.FFmpegOpusAudio.from_probe(current_song, **FFMPEG_OPTIONS)
-                    interaction.guild.voice_client.play(source)
-                
+                interaction.guild.voice_client.source.volume = volume
                 emoji = "🔇" if volume == 0 else "🔈" if volume < 0.4 else "🔉" if volume < 0.8 else "🔊"
                 await interaction.response.send_message(f"{emoji} Ses seviyesi {int(volume * 100)}% olarak ayarlandı!", ephemeral=True)
             else:
