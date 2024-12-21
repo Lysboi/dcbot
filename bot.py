@@ -13,11 +13,21 @@ TOKEN = os.getenv('TOKEN')
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
 
+# Environment variable kontrolü
+if not TOKEN:
+    raise ValueError("TOKEN environment variable'ı bulunamadı!")
+if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
+    raise ValueError("Spotify API bilgileri bulunamadı!")
+
 # Spotify istemcisini başlat
-sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
-    client_id=SPOTIFY_CLIENT_ID,
-    client_secret=SPOTIFY_CLIENT_SECRET
-))
+try:
+    sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
+        client_id=SPOTIFY_CLIENT_ID,
+        client_secret=SPOTIFY_CLIENT_SECRET
+    ))
+except Exception as e:
+    print(f"Spotify bağlantısı kurulamadı: {str(e)}")
+    raise
 
 # Botun prefixini ve intentlerini belirliyoruz
 intents = discord.Intents.all()
