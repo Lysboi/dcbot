@@ -972,7 +972,10 @@ class GainSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         view = self.view
         if not view.current_freq:
-            await interaction.response.send_message("❌ Önce bir frekans seçmelisiniz!", ephemeral=True)
+            try:
+                await interaction.response.send_message("❌ Önce bir frekans seçmelisiniz!", ephemeral=True)
+            except discord.errors.NotFound:
+                return
             return
 
         try:
@@ -1003,7 +1006,10 @@ class GainSelect(discord.ui.Select):
                     await play_song(view.ctx, f"ytsearch:{current_title}")
                 except Exception as e:
                     print(f"Error restarting song: {str(e)}")
-                    await interaction.response.send_message("❌ Şarkı yeniden başlatılırken bir hata oluştu!", ephemeral=True)
+                    try:
+                        await interaction.response.send_message("❌ Şarkı yeniden başlatılırken bir hata oluştu!", ephemeral=True)
+                    except discord.errors.NotFound:
+                        await view.ctx.send("❌ Şarkı yeniden başlatılırken bir hata oluştu!")
                     return
 
             # Görsel ekolayzır göster
@@ -1016,11 +1022,17 @@ class GainSelect(discord.ui.Select):
                 eq_visual += f"{f:>4} Hz: {bars}{spaces} {current_gain:>3}dB\n"
             eq_visual += "```"
 
-            await interaction.response.send_message(f"🎛️ {freq}Hz frekansı {gain}dB olarak ayarlandı!\n{eq_visual}", ephemeral=True)
+            try:
+                await interaction.response.send_message(f"🎛️ {freq}Hz frekansı {gain}dB olarak ayarlandı!\n{eq_visual}", ephemeral=True)
+            except discord.errors.NotFound:
+                await view.ctx.send(f"🎛️ {freq}Hz frekansı {gain}dB olarak ayarlandı!\n{eq_visual}")
 
         except Exception as e:
             print(f"Error updating equalizer: {str(e)}")
-            await interaction.response.send_message("❌ Ekolayzır güncellenirken bir hata oluştu! Lütfen tekrar deneyin.", ephemeral=True)
+            try:
+                await interaction.response.send_message("❌ Ekolayzır güncellenirken bir hata oluştu! Lütfen tekrar deneyin.", ephemeral=True)
+            except discord.errors.NotFound:
+                await view.ctx.send("❌ Ekolayzır güncellenirken bir hata oluştu! Lütfen tekrar deneyin.")
 
 async def create_source(ctx, query):
     """Ses kaynağı oluştur"""
