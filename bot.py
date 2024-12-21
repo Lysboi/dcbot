@@ -10,6 +10,7 @@ import os
 import random
 import json
 import lyricsgenius
+from discord import app_commands
 
 # Environment variable'lardan bilgileri al
 TOKEN = os.getenv('TOKEN')
@@ -305,7 +306,7 @@ async def get_lyrics(ctx):
                 await ctx.send("❌ Şarkı sözleri bulunamadı!")
         except Exception as e:
             print(f"Lyrics error: {str(e)}")  # Hata detayını konsola yazdır
-            await ctx.send(f"❌ Şark�� sözleri alınırken bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
+            await ctx.send(f"❌ Şarkı sözleri alınırken bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
     else:
         await ctx.send("❌ Şu anda çalan bir şarkı yok!")
 
@@ -325,6 +326,12 @@ async def save_playlist(ctx, name: str):
 
 @bot.hybrid_command(aliases=['load', 'yükle'], description="Kaydedilmiş bir playlist'i yükle")
 async def load_playlist(ctx, name: str):
+    """
+    Kaydedilmiş bir playlist'i yükler
+    Parameters
+    -----------
+    name: Yüklenecek playlist'in adı
+    """
     if ctx.guild.id in saved_playlists and name in saved_playlists[ctx.guild.id]:
         if ctx.guild.id not in music_queues:
             music_queues[ctx.guild.id] = deque()
@@ -335,6 +342,17 @@ async def load_playlist(ctx, name: str):
             await play_next(ctx)
     else:
         await ctx.send(f"❌ '{name}' adlı playlist bulunamadı!")
+
+@load_playlist.autocomplete('name')
+async def load_playlist_autocomplete(interaction: discord.Interaction, current: str):
+    guild_id = interaction.guild_id
+    if guild_id in saved_playlists:
+        playlists = saved_playlists[guild_id].keys()
+        return [
+            app_commands.Choice(name=name, value=name)
+            for name in playlists if current.lower() in name.lower()
+        ][:25]  # Discord maksimum 25 öneri gösterebilir
+    return []
 
 @bot.hybrid_command(aliases=['list', 'listele'], description="Kaydedilmiş playlist'leri göster")
 async def list_playlists(ctx):
@@ -461,7 +479,7 @@ class MusicControls(View):
         self.ctx = ctx
         self.volume = 100
 
-    @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.primary, custom_id="previous")
+    @discord.ui.button(emoji="⏮���", style=discord.ButtonStyle.primary, custom_id="previous")
     async def previous_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message("Bu özellik yakında eklenecek!", ephemeral=True)
 
@@ -771,10 +789,17 @@ async def queue(ctx):
 
 @bot.hybrid_command(aliases=['eq', 'ekolayzır'], description="Ekolayzır ayarlarını göster ve düzenle")
 async def equalizer(ctx, action: str = None, preset_name: str = None):
+    """
+    Ekolayzır ayarlarını gösterir ve düzenler
+    Parameters
+    -----------
+    action: Yapılacak işlem (default, clear, preset, list)
+    preset_name: Preset adı (preset komutu için)
+    """
     if not ctx.voice_client or not ctx.voice_client.is_playing():
         await ctx.send("❌ Şu anda çalan bir şarkı yok!")
         return
-    
+
     guild_id = ctx.guild.id
     
     if action is None:
@@ -798,7 +823,7 @@ async def equalizer(ctx, action: str = None, preset_name: str = None):
         
         await ctx.send(embed=embed, view=view)
         return
-    
+
     action = action.lower()
     
     if action == "default":
@@ -851,6 +876,29 @@ async def equalizer(ctx, action: str = None, preset_name: str = None):
     else:
         await ctx.send("❌ Geçersiz komut! Kullanılabilir komutları görmek için `!eq` yazın.")
 
+@equalizer.autocomplete('action')
+async def equalizer_action_autocomplete(interaction: discord.Interaction, current: str):
+    actions = ['default', 'clear', 'preset', 'list']
+    return [
+        app_commands.Choice(name=action, value=action)
+        for action in actions if current.lower() in action.lower()
+    ]
+
+@equalizer.autocomplete('preset_name')
+async def equalizer_preset_autocomplete(interaction: discord.Interaction, current: str):
+    default_presets = ['bass', 'pop', 'rock', 'classical', 'jazz']
+    guild_id = interaction.guild_id
+    
+    # Kullanıcı presetlerini ve varsayılan presetleri birleştir
+    all_presets = default_presets.copy()
+    if guild_id in equalizer_presets:
+        all_presets.extend(equalizer_presets[guild_id].keys())
+    
+    return [
+        app_commands.Choice(name=preset, value=preset)
+        for preset in all_presets if current.lower() in preset.lower()
+    ][:25]
+
 async def restart_song(ctx, message):
     """Şarkıyı yeniden başlat ve mesaj gönder"""
     if ctx.guild.id in current_songs:
@@ -893,8 +941,14 @@ async def show_stats(ctx):
     await ctx.send(embed=embed)
 
 # Radyo komutları
-@bot.command(aliases=['radio', 'radyo'])
-async def play_radio(ctx, station=None):
+@bot.command(aliases=['radio', 'radyo'], description="Radyo istasyonunu çal")
+async def play_radio(ctx, station: str = None):
+    """
+    Radyo istasyonunu çalar
+    Parameters
+    -----------
+    station: Çalınacak radyo istasyonunun adı
+    """
     if station is None:
         # Radyo listesini göster
         embed = discord.Embed(title="📻 Radyo İstasyonları", color=discord.Color.blue())
@@ -933,6 +987,13 @@ async def play_radio(ctx, station=None):
     
     ctx.voice_client.play(source)
     await ctx.send(f"📻 {station.title()} radyosu çalınıyor!")
+
+@play_radio.autocomplete('station')
+async def radio_station_autocomplete(interaction: discord.Interaction, current: str):
+    return [
+        app_commands.Choice(name=station.title(), value=station)
+        for station in radio_stations.keys() if current.lower() in station.lower()
+    ]
 
 # Ses efektleri
 @bot.command(aliases=['echo', 'eko'])
@@ -1027,7 +1088,7 @@ class GainSelect(discord.ui.Select):
     def __init__(self):
         options = []
         for gain in range(-20, 21, 2):
-            emoji = "🔊" if gain > 0 else "🔈" if gain < 0 else "⚪"
+            emoji = "��" if gain > 0 else "🔈" if gain < 0 else "⚪"
             options.append(discord.SelectOption(label=f"{gain} dB", value=str(gain), emoji=emoji))
         super().__init__(placeholder="Gain Değeri Seç", options=options, custom_id="gain_select")
 
