@@ -1,17 +1,21 @@
 import discord
 from discord.ext import commands
 import yt_dlp
-from discord.ui import Button, View
+from discord.ui import Button, View, Select
 import asyncio
 from collections import deque
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import os
+import random
+import json
+import lyricsgenius
 
 # Environment variable'lardan bilgileri al
 TOKEN = os.getenv('TOKEN')
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
+GENIUS_TOKEN = os.getenv('GENIUS_TOKEN')  # Şarkı sözleri için Genius API token'ı
 
 # Environment variable kontrolü
 if not TOKEN:
@@ -19,14 +23,15 @@ if not TOKEN:
 if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
     raise ValueError("Spotify API bilgileri bulunamadı!")
 
-# Spotify istemcisini başlat
+# Spotify ve Genius istemcilerini başlat
 try:
     sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
         client_id=SPOTIFY_CLIENT_ID,
         client_secret=SPOTIFY_CLIENT_SECRET
     ))
+    genius = lyricsgenius.Genius(GENIUS_TOKEN)
 except Exception as e:
-    print(f"Spotify bağlantısı kurulamadı: {str(e)}")
+    print(f"API bağlantısı kurulamadı: {str(e)}")
     raise
 
 # Botun prefixini ve intentlerini belirliyoruz
@@ -34,12 +39,258 @@ intents = discord.Intents.all()
 intents.message_content = True
 intents.voice_states = True
 
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix=['!', '.'], intents=intents)
 
 # Müzik kuyruğunu ve şu an çalan şarkıyı tutacak sözlükler
 music_queues = {}
 current_songs = {}
 is_paused = {}
+loop_modes = {}  # none, song, queue
+saved_playlists = {}
+dj_roles = {}
+
+# Yardım komutu
+@bot.command(aliases=['yardım', 'help', 'h'])
+async def komutlar(ctx):
+    embed = discord.Embed(title="🎵 NoceBOT Komutları", color=discord.Color.blue())
+    
+    # Temel Komutlar
+    basic_commands = """
+    `!play`, `!çal` - Şarkı çal
+    `!stop`, `!dur` - Şarkıyı durdur
+    `!pause`, `!duraklat` - Şarkıyı duraklat
+    `!resume`, `!devam` - Şarkıyı devam ettir
+    `!skip`, `!geç` - Şarkıyı geç
+    `!join`, `!katıl` - Sesli kanala katıl
+    """
+    embed.add_field(name="📌 Temel Komutlar", value=basic_commands, inline=False)
+    
+    # Sıra Komutları
+    queue_commands = """
+    `!queue`, `!sıra` - Sırayı göster
+    `!clear`, `!temizle` - Sırayı temizle
+    `!shuffle`, `!karıştır` - Sırayı karıştır
+    `!loop`, `!döngü` - Döngü modunu değiştir
+    `!remove`, `!kaldır` - Sıradan şarkı kaldır
+    `!move`, `!taşı` - Sıradaki şarkıları taşı
+    """
+    embed.add_field(name="📋 Sıra Komutları", value=queue_commands, inline=False)
+    
+    # Bilgi Komutları
+    info_commands = """
+    `!now`, `!şuan` - Çalan şarkı bilgisi
+    `!lyrics`, `!sözler` - Şarkı sözleri
+    `!search`, `!ara` - YouTube'da ara
+    """
+    embed.add_field(name="ℹ️ Bilgi Komutları", value=info_commands, inline=False)
+    
+    # Playlist Komutları
+    playlist_commands = """
+    `!save`, `!kaydet` - Playlist kaydet
+    `!load`, `!yükle` - Playlist yükle
+    `!list`, `!listele` - Playlistleri listele
+    """
+    embed.add_field(name="💾 Playlist Komutları", value=playlist_commands, inline=False)
+    
+    # DJ Komutları
+    dj_commands = """
+    `!dj` - DJ rolü ayarla
+    `!voteskip`, `!oylageç` - Oylama ile geç
+    `!forceskip`, `!zorla` - Zorla geç (DJ)
+    """
+    embed.add_field(name="🎧 DJ Komutları", value=dj_commands, inline=False)
+    
+    await ctx.send(embed=embed)
+
+# Şarkıyı durdur
+@bot.command(aliases=['stop', 'dur', 'leave', 'ayrıl'])
+async def stop_music(ctx):
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
+        if ctx.guild.id in music_queues:
+            music_queues[ctx.guild.id].clear()
+        await ctx.send("👋 Görüşürüz!")
+
+# Şarkıyı duraklat/devam ettir
+@bot.command(aliases=['pause', 'duraklat'])
+async def pause_music(ctx):
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.pause()
+        is_paused[ctx.guild.id] = True
+        await ctx.send("⏸️ Şarkı duraklatıldı")
+
+@bot.command(aliases=['resume', 'devam'])
+async def resume_music(ctx):
+    if ctx.voice_client and ctx.voice_client.is_paused():
+        ctx.voice_client.resume()
+        is_paused[ctx.guild.id] = False
+        await ctx.send("▶️ Şarkı devam ediyor")
+
+# Sırayı karıştır
+@bot.command(aliases=['shuffle', 'karıştır'])
+async def shuffle_queue(ctx):
+    if ctx.guild.id in music_queues and music_queues[ctx.guild.id]:
+        queue = list(music_queues[ctx.guild.id])
+        random.shuffle(queue)
+        music_queues[ctx.guild.id] = deque(queue)
+        await ctx.send("🔀 Sıra karıştırıldı!")
+    else:
+        await ctx.send("❌ Sırada şarkı yok!")
+
+# Döngü modu
+@bot.command(aliases=['loop', 'döngü'])
+async def toggle_loop(ctx, mode=None):
+    if mode is None:
+        # Döngü modları: none -> song -> queue -> none
+        current_mode = loop_modes.get(ctx.guild.id, "none")
+        if current_mode == "none":
+            loop_modes[ctx.guild.id] = "song"
+            await ctx.send("🔂 Şarkı döngüsü açıldı")
+        elif current_mode == "song":
+            loop_modes[ctx.guild.id] = "queue"
+            await ctx.send("🔁 Sıra döngüsü açıldı")
+        else:
+            loop_modes[ctx.guild.id] = "none"
+            await ctx.send("➡️ Döngü kapatıldı")
+    else:
+        mode = mode.lower()
+        if mode in ["none", "kapalı", "off"]:
+            loop_modes[ctx.guild.id] = "none"
+            await ctx.send("➡️ Döngü kapatıldı")
+        elif mode in ["song", "şarkı", "current", "this"]:
+            loop_modes[ctx.guild.id] = "song"
+            await ctx.send("🔂 Şarkı döngüsü açıldı")
+        elif mode in ["queue", "sıra", "all"]:
+            loop_modes[ctx.guild.id] = "queue"
+            await ctx.send("🔁 Sıra döngüsü açıldı")
+
+# Şu an çalan şarkı bilgisi
+@bot.command(aliases=['now', 'şuan', 'playing', 'np'])
+async def now_playing(ctx):
+    if ctx.guild.id in current_songs and ctx.voice_client and ctx.voice_client.is_playing():
+        title = current_songs[ctx.guild.id]
+        embed = discord.Embed(title="🎵 Şu an çalıyor", description=title, color=discord.Color.green())
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
+
+# Şarkı sözleri
+@bot.command(aliases=['lyrics', 'sözler'])
+async def get_lyrics(ctx):
+    if ctx.guild.id in current_songs:
+        title = current_songs[ctx.guild.id]
+        try:
+            song = genius.search_song(title)
+            if song:
+                lyrics = song.lyrics
+                # Şarkı sözlerini parçalara böl (Discord mesaj limiti)
+                chunks = [lyrics[i:i+1900] for i in range(0, len(lyrics), 1900)]
+                for chunk in chunks:
+                    embed = discord.Embed(description=chunk, color=discord.Color.blue())
+                    await ctx.send(embed=embed)
+            else:
+                await ctx.send("❌ Şarkı sözleri bulunamadı!")
+        except Exception as e:
+            await ctx.send(f"❌ Şarkı sözleri alınırken bir hata oluştu: {str(e)}")
+    else:
+        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
+
+# Playlist kaydet/yükle
+@bot.command(aliases=['save', 'kaydet'])
+async def save_playlist(ctx, name):
+    if ctx.guild.id in music_queues and music_queues[ctx.guild.id]:
+        if ctx.guild.id not in saved_playlists:
+            saved_playlists[ctx.guild.id] = {}
+        saved_playlists[ctx.guild.id][name] = list(music_queues[ctx.guild.id])
+        # Playlistleri dosyaya kaydet
+        with open('playlists.json', 'w', encoding='utf-8') as f:
+            json.dump(saved_playlists, f, ensure_ascii=False, indent=4)
+        await ctx.send(f"✅ Playlist '{name}' kaydedildi!")
+    else:
+        await ctx.send("❌ Sırada şarkı yok!")
+
+@bot.command(aliases=['load', 'yükle'])
+async def load_playlist(ctx, name):
+    if ctx.guild.id in saved_playlists and name in saved_playlists[ctx.guild.id]:
+        if ctx.guild.id not in music_queues:
+            music_queues[ctx.guild.id] = deque()
+        playlist = saved_playlists[ctx.guild.id][name]
+        music_queues[ctx.guild.id].extend(playlist)
+        await ctx.send(f"✅ Playlist '{name}' yüklendi! {len(playlist)} şarkı sıraya eklendi.")
+        if not ctx.voice_client.is_playing():
+            await play_next(ctx)
+    else:
+        await ctx.send(f"❌ '{name}' adlı playlist bulunamadı!")
+
+@bot.command(aliases=['list', 'listele'])
+async def list_playlists(ctx):
+    if ctx.guild.id in saved_playlists and saved_playlists[ctx.guild.id]:
+        playlists = list(saved_playlists[ctx.guild.id].keys())
+        embed = discord.Embed(title="📋 Kayıtlı Playlistler", color=discord.Color.blue())
+        for i, name in enumerate(playlists, 1):
+            embed.add_field(name=f"{i}. {name}", value=f"{len(saved_playlists[ctx.guild.id][name])} şarkı", inline=False)
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send("❌ Kayıtlı playlist yok!")
+
+# DJ sistemi
+@bot.command()
+async def dj(ctx, role: discord.Role = None):
+    if ctx.author.guild_permissions.administrator:
+        if role:
+            dj_roles[ctx.guild.id] = role.id
+            await ctx.send(f"✅ DJ rolü {role.mention} olarak ayarlandı!")
+        else:
+            if ctx.guild.id in dj_roles:
+                del dj_roles[ctx.guild.id]
+                await ctx.send("✅ DJ rolü kaldırıldı!")
+            else:
+                await ctx.send("❌ DJ rolü zaten ayarlanmamış!")
+    else:
+        await ctx.send("❌ Bu komutu kullanmak için yönetici yetkisine sahip olmalısın!")
+
+@bot.command(aliases=['voteskip', 'oylageç'])
+async def vote_skip(ctx):
+    if not ctx.voice_client or not ctx.voice_client.is_playing():
+        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
+        return
+
+    # Oylama mesajı
+    msg = await ctx.send("Şarkıyı geçmek için oylama başladı! ✅ ile oyla!")
+    await msg.add_reaction("✅")
+    
+    def check(reaction, user):
+        return str(reaction.emoji) == "✅" and not user.bot and user.voice and user.voice.channel == ctx.voice_client.channel
+
+    try:
+        # 30 saniye bekle ve oyları topla
+        await asyncio.sleep(30)
+        msg = await ctx.channel.fetch_message(msg.id)
+        votes = [reaction for reaction in msg.reactions if str(reaction.emoji) == "✅"][0]
+        
+        # Sesli kanaldaki kişi sayısının yarısından fazlası oy verdiyse
+        voice_members = len([m for m in ctx.voice_client.channel.members if not m.bot])
+        if votes.count >= voice_members / 2:
+            ctx.voice_client.stop()
+            await ctx.send("🎵 Oylama başarılı! Şarkı geçiliyor...")
+        else:
+            await ctx.send("❌ Yeterli oy toplanamadı!")
+    except Exception as e:
+        await ctx.send(f"❌ Bir hata oluştu: {str(e)}")
+
+@bot.command(aliases=['forceskip', 'zorla'])
+async def force_skip(ctx):
+    if ctx.guild.id in dj_roles:
+        role = ctx.guild.get_role(dj_roles[ctx.guild.id])
+        if role not in ctx.author.roles:
+            await ctx.send("❌ Bu komutu kullanmak için DJ rolüne sahip olmalısın!")
+            return
+    
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.stop()
+        await ctx.send("⏭️ Şarkı geçildi!")
+    else:
+        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
 
 async def get_spotify_tracks(url):
     tracks = []
