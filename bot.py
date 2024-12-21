@@ -49,6 +49,11 @@ loop_modes = {}  # none, song, queue
 saved_playlists = {}
 dj_roles = {}
 
+# Ses filtrelerini ve otomatik özellikleri tutacak sözlükler
+filters = {}  # nightcore, 8d, vaporwave
+autoplay_enabled = {}  # autoplay durumu
+autodj_enabled = {}  # autodj durumu
+
 # Yardım komutu
 @bot.command(aliases=['yardım', 'y', 'komutlar'])
 async def commands(ctx):
@@ -474,21 +479,31 @@ async def play_song(ctx, query):
             'source_address': '0.0.0.0'
         }
 
+        # Ses filtrelerini uygula
+        guild_id = ctx.guild.id
+        filter_options = []
+        
+        if guild_id in filters:
+            if filters[guild_id].get("nightcore", False):
+                filter_options.append("asetrate=44100*1.25,aresample=44100")
+            if filters[guild_id].get("8d", False):
+                filter_options.append("apulsator=hz=0.125")
+            if filters[guild_id].get("vaporwave", False):
+                filter_options.append("asetrate=44100*0.8,aresample=44100")
+
         FFMPEG_OPTIONS = {
             'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'options': '-vn'
+            'options': f'-vn -af "{",".join(filter_options)}"' if filter_options else '-vn'
         }
 
         with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
             try:
                 # YouTube'da ara
                 if query.startswith('ytsearch:'):
-                    # Spotify şarkısı
                     info = ydl.extract_info(query, download=False)
                     if info.get('entries'):
                         info = info['entries'][0]
                 else:
-                    # YouTube URL'si
                     info = ydl.extract_info(query, download=False)
 
                 if not info:
@@ -498,14 +513,15 @@ async def play_song(ctx, query):
                 # Şarkı bilgilerini al
                 title = info.get('title', 'Bilinmeyen şarkı')
                 url = info.get('url')
+                video_id = info.get('id')
                 
                 if not url:
-                    await ctx.send("❌ Şark�� URL'si alınamadı!")
+                    await ctx.send("❌ Şarkı URL'si alınamadı!")
                     return
 
                 # Ses kaynağını oluştur
                 source = await discord.FFmpegOpusAudio.from_probe(url, **FFMPEG_OPTIONS)
-                source.volume = 1.0  # Varsayılan ses seviyesi
+                source.volume = 1.0
 
                 # Önceki şarkıyı durdur
                 if ctx.voice_client.is_playing():
@@ -513,9 +529,27 @@ async def play_song(ctx, query):
 
                 # Yeni şarkıyı çal
                 def after_playing(error):
-                    if error:
-                        print(f'Oynatma hatası: {error}')
-                    asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop)
+                    async def next_song():
+                        if error:
+                            print(f'Oynatma hatası: {error}')
+                        
+                        if ctx.guild.id in autoplay_enabled and autoplay_enabled[ctx.guild.id]:
+                            # Benzer şarkıları al
+                            try:
+                                related_url = f"https://www.youtube.com/watch?v={video_id}"
+                                with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+                                    info = ydl.extract_info(related_url, download=False)
+                                    if info.get('related_videos'):
+                                        next_video = random.choice(info['related_videos'])
+                                        next_url = f"https://www.youtube.com/watch?v={next_video['id']}"
+                                        asyncio.create_task(play_song(ctx, next_url))
+                                        return
+                            except Exception as e:
+                                print(f"Autoplay error: {str(e)}")
+                        
+                        await play_next(ctx)
+                    
+                    asyncio.run_coroutine_threadsafe(next_song(), bot.loop)
 
                 ctx.voice_client.play(source, after=after_playing)
                 current_songs[ctx.guild.id] = title
@@ -627,6 +661,112 @@ async def clear(ctx):
     if ctx.guild.id in music_queues:
         music_queues[ctx.guild.id].clear()
         await ctx.send("Sıra temizlendi!")
+
+# Ses filtreleri
+@bot.command(aliases=['nightcore', 'nc'])
+async def nightcore_filter(ctx):
+    if not ctx.voice_client or not ctx.voice_client.is_playing():
+        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
+        return
+    
+    guild_id = ctx.guild.id
+    if guild_id not in filters:
+        filters[guild_id] = {"nightcore": False, "8d": False, "vaporwave": False}
+    
+    filters[guild_id]["nightcore"] = not filters[guild_id]["nightcore"]
+    
+    # Şarkıyı yeniden başlat
+    if ctx.guild.id in current_songs:
+        current_title = current_songs[ctx.guild.id]
+        ctx.voice_client.stop()
+        await play_song(ctx, f"ytsearch:{current_title}")
+        
+        if filters[guild_id]["nightcore"]:
+            await ctx.send("🎵 Nightcore modu açıldı!")
+        else:
+            await ctx.send("🎵 Nightcore modu kapatıldı!")
+
+@bot.command(aliases=['8d'])
+async def eight_d_filter(ctx):
+    if not ctx.voice_client or not ctx.voice_client.is_playing():
+        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
+        return
+    
+    guild_id = ctx.guild.id
+    if guild_id not in filters:
+        filters[guild_id] = {"nightcore": False, "8d": False, "vaporwave": False}
+    
+    filters[guild_id]["8d"] = not filters[guild_id]["8d"]
+    
+    # Şarkıyı yeniden başlat
+    if ctx.guild.id in current_songs:
+        current_title = current_songs[ctx.guild.id]
+        ctx.voice_client.stop()
+        await play_song(ctx, f"ytsearch:{current_title}")
+        
+        if filters[guild_id]["8d"]:
+            await ctx.send("🎵 8D ses modu açıldı!")
+        else:
+            await ctx.send("🎵 8D ses modu kapatıldı!")
+
+@bot.command(aliases=['vaporwave', 'vw'])
+async def vaporwave_filter(ctx):
+    if not ctx.voice_client or not ctx.voice_client.is_playing():
+        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
+        return
+    
+    guild_id = ctx.guild.id
+    if guild_id not in filters:
+        filters[guild_id] = {"nightcore": False, "8d": False, "vaporwave": False}
+    
+    filters[guild_id]["vaporwave"] = not filters[guild_id]["vaporwave"]
+    
+    # Şarkıyı yeniden başlat
+    if ctx.guild.id in current_songs:
+        current_title = current_songs[ctx.guild.id]
+        ctx.voice_client.stop()
+        await play_song(ctx, f"ytsearch:{current_title}")
+        
+        if filters[guild_id]["vaporwave"]:
+            await ctx.send("🎵 Vaporwave modu açıldı!")
+        else:
+            await ctx.send("🎵 Vaporwave modu kapatıldı!")
+
+# Otomatik özellikler
+@bot.command(aliases=['autoplay', 'otomatik'])
+async def toggle_autoplay(ctx):
+    guild_id = ctx.guild.id
+    autoplay_enabled[guild_id] = not autoplay_enabled.get(guild_id, False)
+    
+    if autoplay_enabled[guild_id]:
+        await ctx.send("🎵 Otomatik çalma modu açıldı! Şarkı bitince benzer şarkılar çalınacak.")
+    else:
+        await ctx.send("🎵 Otomatik çalma modu kapatıldı!")
+
+@bot.command(aliases=['autodj', 'djauto'])
+async def toggle_autodj(ctx):
+    guild_id = ctx.guild.id
+    autodj_enabled[guild_id] = not autodj_enabled.get(guild_id, False)
+    
+    if autodj_enabled[guild_id]:
+        await ctx.send("🎵 AutoDJ modu açıldı! Her 5 dakikada bir rastgele şarkı çalınacak.")
+        await auto_dj(ctx)
+    else:
+        await ctx.send("🎵 AutoDJ modu kapatıldı!")
+
+async def auto_dj(ctx):
+    while autodj_enabled.get(ctx.guild.id, False):
+        if not ctx.voice_client or not ctx.voice_client.is_playing():
+            # Rastgele bir şarkı seç ve çal
+            random_songs = [
+                "ytsearch:pop hits 2023",
+                "ytsearch:rock classics",
+                "ytsearch:electronic dance music",
+                "ytsearch:hip hop hits",
+                "ytsearch:türkçe pop"
+            ]
+            await play_song(ctx, random.choice(random_songs))
+        await asyncio.sleep(300)  # 5 dakika bekle
 
 # Botu çalıştır
 bot.run(TOKEN)
