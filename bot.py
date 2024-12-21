@@ -44,6 +44,7 @@ bot = commands.Bot(command_prefix=['!', '.'], intents=intents)
 # Müzik kuyruğunu ve şu an çalan şarkıyı tutacak sözlükler
 music_queues = {}
 current_songs = {}
+current_urls = {}  # Şarkı URL'lerini tutacak yeni sözlük
 is_paused = {}
 loop_modes = {}  # none, song, queue
 saved_playlists = {}
@@ -186,7 +187,10 @@ async def toggle_loop(ctx, mode=None):
 async def now_playing(ctx):
     if ctx.guild.id in current_songs and ctx.voice_client and ctx.voice_client.is_playing():
         title = current_songs[ctx.guild.id]
-        embed = discord.Embed(title="🎵 Şu an çalıyor", description=title, color=discord.Color.green())
+        url = current_urls.get(ctx.guild.id, "URL bilgisi yok")
+        embed = discord.Embed(title="🎵 Şu an çalıyor", color=discord.Color.green())
+        embed.add_field(name="Şarkı", value=title, inline=False)
+        embed.add_field(name="Link", value=url, inline=False)
         await ctx.send(embed=embed)
     else:
         await ctx.send("❌ Şu anda çalan bir şarkı yok!")
@@ -523,6 +527,7 @@ async def play_song(ctx, query):
                 # Şarkı bilgilerini al
                 title = info.get('title', 'Bilinmeyen şarkı')
                 url = info.get('url')
+                video_url = info.get('webpage_url', 'URL bilgisi yok')  # YouTube video URL'si
                 
                 if not url:
                     await ctx.send("❌ Şarkı URL'si alınamadı!")
@@ -539,10 +544,11 @@ async def play_song(ctx, query):
                 # Yeni şarkıyı çal
                 ctx.voice_client.play(source)
                 current_songs[ctx.guild.id] = title
+                current_urls[ctx.guild.id] = video_url  # Video URL'sini kaydet
 
                 # Kontrol butonlarını göster
                 view = MusicControls(ctx)
-                await ctx.send(f'🎵 Şu an çalıyor: {title}', view=view)
+                await ctx.send(f'🎵 Şu an çalıyor: {title}\n🔗 Link: {video_url}', view=view)
 
             except Exception as e:
                 print(f"Error in play_song: {str(e)}")
