@@ -13,10 +13,6 @@ TOKEN = os.getenv('TOKEN')
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
 
-# Spotify API kimlik bilgileri
-SPOTIFY_CLIENT_ID = config['SPOTIFY_CLIENT_ID']
-SPOTIFY_CLIENT_SECRET = config['SPOTIFY_CLIENT_SECRET']
-
 # Spotify istemcisini başlat
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
     client_id=SPOTIFY_CLIENT_ID,
@@ -274,7 +270,7 @@ async def play(ctx, *, url):
                 else:
                     await play_song(ctx, tracks[0])
             else:
-                await ctx.send("Spotify'dan şarkı bilgisi alınamadı!")
+                await ctx.send("Spotify'dan şark�� bilgisi alınamadı!")
             return
 
         # YouTube playlist kontrolü
