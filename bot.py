@@ -270,7 +270,7 @@ async def play(ctx, *, url):
                 else:
                     await play_song(ctx, tracks[0])
             else:
-                await ctx.send("Spotify'dan şark�� bilgisi alınamadı!")
+                await ctx.send("Spotify'dan şarkı bilgisi alınamadı!")
             return
 
         # YouTube playlist kontrolü
@@ -321,9 +321,6 @@ async def clear(ctx):
     if ctx.guild.id in music_queues:
         music_queues[ctx.guild.id].clear()
         await ctx.send("Sıra temizlendi!")
-
-# Bot token'ını buraya ekle
-TOKEN = config['TOKEN']
 
 # Botu çalıştır
 bot.run(TOKEN)
