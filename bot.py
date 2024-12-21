@@ -440,7 +440,7 @@ class VolumeDropdown(discord.ui.Select):
             discord.SelectOption(label="60%", emoji="🔉", value="60"),
             discord.SelectOption(label="80%", emoji="🔊", value="80"),
             discord.SelectOption(label="100%", emoji="🔊", value="100"),
-            discord.SelectOption(label="120%", emoji="���", value="120"),
+            discord.SelectOption(label="120%", emoji="🔊", value="120"),
             discord.SelectOption(label="150%", emoji="🔊", value="150"),
             discord.SelectOption(label="200%", emoji="🔊", value="200")
         ]
@@ -1031,23 +1031,33 @@ class GainSelect(discord.ui.Select):
 
         equalizer_settings[guild_id] = ",".join(filters)
 
-        # Ses kaynağını güncelle
-        if view.ctx.voice_client and view.ctx.voice_client.is_playing():
-            current_title = current_songs[guild_id]
-            source = await create_source(view.ctx, current_title)
-            view.ctx.voice_client.source = source
+        try:
+            # Ses kaynağını güncelle
+            if view.ctx.voice_client and view.ctx.voice_client.is_playing():
+                current_title = current_songs[guild_id]
+                new_source = await create_source(view.ctx, current_title)
+                if new_source:
+                    # Mevcut pozisyonu kaydet
+                    current_position = view.ctx.voice_client.source.original.read()
+                    view.ctx.voice_client.source = new_source
+                else:
+                    await interaction.response.send_message("❌ Ses kaynağı güncellenirken bir hata oluştu!", ephemeral=True)
+                    return
 
-        # Görsel ekolayzır göster
-        eq_visual = "```\n"
-        freqs = ["32", "64", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"]
-        for f in freqs:
-            gain = equalizer_settings[guild_id].get(f, 0)
-            bars = "█" * int((gain + 20) / 2)
-            spaces = " " * (20 - len(bars))
-            eq_visual += f"{f:>4} Hz: {bars}{spaces} {gain:>3}dB\n"
-        eq_visual += "```"
+            # Görsel ekolayzır göster
+            eq_visual = "```\n"
+            freqs = ["32", "64", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"]
+            for f in freqs:
+                gain = equalizer_settings[guild_id].get(f, 0)
+                bars = "█" * int((gain + 20) / 2)
+                spaces = " " * (20 - len(bars))
+                eq_visual += f"{f:>4} Hz: {bars}{spaces} {gain:>3}dB\n"
+            eq_visual += "```"
 
-        await interaction.response.send_message(f"🎛️ Ekolayzır ayarları güncellendi:\n{eq_visual}", ephemeral=True)
+            await interaction.response.send_message(f"🎛️ Ekolayzır ayarları güncellendi:\n{eq_visual}", ephemeral=True)
+        except Exception as e:
+            print(f"Error updating equalizer: {str(e)}")
+            await interaction.response.send_message("❌ Ekolayzır güncellenirken bir hata oluştu!", ephemeral=True)
 
 async def create_source(ctx, query):
     """Ses kaynağı oluştur"""
@@ -1066,13 +1076,12 @@ async def create_source(ctx, query):
                 if equalizer_settings[guild_id] != "default" and equalizer_settings[guild_id] is not None:
                     filter_options.append(equalizer_settings[guild_id])
 
-            ffmpeg_options = FFMPEG_OPTIONS.copy()
-            if filter_options:
-                ffmpeg_options['options'] += f' -af "{",".join(filter_options)}"'
+            ffmpeg_options = {
+                'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+                'options': '-vn -c:a libopus -b:a 192k -ar 48000 -ac 2' + (f' -af "{",".join(filter_options)}"' if filter_options else '')
+            }
 
-            source = await discord.FFmpegOpusAudio.from_probe(url, **ffmpeg_options)
-            source.volume = 1.0
-            return source
+            return await discord.FFmpegOpusAudio.from_probe(url, **ffmpeg_options)
     except Exception as e:
         print(f"Error creating source: {str(e)}")
         return None
