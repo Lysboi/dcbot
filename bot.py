@@ -41,13 +41,21 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix=['!', '.'], intents=intents)
 
+# Playlist dosyasını yükle
+try:
+    with open('playlists.json', 'r', encoding='utf-8') as f:
+        saved_playlists = json.load(f)
+except FileNotFoundError:
+    saved_playlists = {}
+    with open('playlists.json', 'w', encoding='utf-8') as f:
+        json.dump(saved_playlists, f, ensure_ascii=False, indent=4)
+
 # Müzik kuyruğunu ve şu an çalan şarkıyı tutacak sözlükler
 music_queues = {}
 current_songs = {}
 current_urls = {}  # Şarkı URL'lerini tutacak yeni sözlük
 is_paused = {}
 loop_modes = {}  # none, song, queue
-saved_playlists = {}
 dj_roles = {}
 
 # Ekolayzır ayarlarını tutacak sözlükler
@@ -293,7 +301,7 @@ async def dj(ctx, role: discord.Role = None):
             else:
                 await ctx.send("❌ DJ rolü zaten ayarlanmamış!")
     else:
-        await ctx.send("❌ Bu komutu kullanmak için yönetici yetkisine sahip olmalısın!")
+        await ctx.send("�� Bu komutu kullanmak için yönetici yetkisine sahip olmalısın!")
 
 @bot.command(aliases=['voteskip', 'oylageç'])
 async def vote_skip(ctx):
@@ -981,7 +989,7 @@ async def bass_boost(ctx, level="normal"):
         await ctx.send("❌ Geçersiz seviye! Kullanılabilir seviyeler: off, low, normal, high")
         return
     
-    # Şarkıy�� yeniden başlat
+    # Şarkıyı yeniden başlat
     if ctx.guild.id in current_songs:
         current_title = current_songs[ctx.guild.id]
         ctx.voice_client.stop()
