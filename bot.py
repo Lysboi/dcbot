@@ -50,8 +50,8 @@ saved_playlists = {}
 dj_roles = {}
 
 # Yardım komutu
-@bot.command(aliases=['yardım', 'help', 'h'])
-async def komutlar(ctx):
+@bot.command(aliases=['yardım', 'y', 'komutlar'])
+async def commands(ctx):
     embed = discord.Embed(title="🎵 NoceBOT Komutları", color=discord.Color.blue())
     
     # Temel Komutlar
