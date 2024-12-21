@@ -995,30 +995,15 @@ class GainSelect(discord.ui.Select):
 
             equalizer_settings[guild_id] = ",".join(filters)
 
-            # Şarkıyı güncelle
+            # Şarkıyı yeniden başlat
             if view.ctx.voice_client and view.ctx.voice_client.is_playing():
                 try:
                     current_title = current_songs[guild_id]
-                    
-                    # Yeni ses kaynağı oluştur
-                    new_source = await create_source(view.ctx, f"ytsearch:{current_title}")
-                    if new_source:
-                        # Şarkıyı duraklat
-                        view.ctx.voice_client.pause()
-                        
-                        # Yeni kaynağı ayarla ve hemen başlat
-                        view.ctx.voice_client.source = new_source
-                        view.ctx.voice_client.resume()
-                    else:
-                        await interaction.response.send_message("❌ Ses kaynağı oluşturulamadı!", ephemeral=True)
-                        return
-                        
+                    view.ctx.voice_client.stop()
+                    await play_song(view.ctx, f"ytsearch:{current_title}")
                 except Exception as e:
-                    print(f"Error updating source: {str(e)}")
-                    # Hata durumunda orijinal şarkıyı devam ettir
-                    if view.ctx.voice_client and view.ctx.voice_client.is_paused():
-                        view.ctx.voice_client.resume()
-                    await interaction.response.send_message("❌ Şarkı güncellenirken bir hata oluştu!", ephemeral=True)
+                    print(f"Error restarting song: {str(e)}")
+                    await interaction.response.send_message("❌ Şarkı yeniden başlatılırken bir hata oluştu!", ephemeral=True)
                     return
 
             # Görsel ekolayzır göster
@@ -1036,9 +1021,6 @@ class GainSelect(discord.ui.Select):
         except Exception as e:
             print(f"Error updating equalizer: {str(e)}")
             await interaction.response.send_message("❌ Ekolayzır güncellenirken bir hata oluştu! Lütfen tekrar deneyin.", ephemeral=True)
-            # Hata durumunda şarkıyı devam ettir
-            if view.ctx.voice_client and view.ctx.voice_client.is_paused():
-                view.ctx.voice_client.resume()
 
 async def create_source(ctx, query):
     """Ses kaynağı oluştur"""
