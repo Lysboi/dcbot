@@ -264,7 +264,7 @@ async def now_playing(ctx):
         await ctx.send("❌ Şu anda çalan bir şarkı yok!")
 
 # Şarkı sözleri
-@bot.command(aliases=['lyrics', 'sözler'])
+@bot.hybrid_command(aliases=['lyrics', 'sözler'], description="Çalan şarkının sözlerini göster")
 async def get_lyrics(ctx):
     if ctx.guild.id in current_songs:
         title = current_songs[ctx.guild.id]
@@ -768,51 +768,6 @@ async def queue(ctx):
         await ctx.send(f"Sıradaki şarkılar:\n{queue_list}")
     else:
         await ctx.send("Sırada şarkı yok!")
-
-@bot.hybrid_command(aliases=['lyrics', 'sözler'], description="Çalan şarkının sözlerini göster")
-async def get_lyrics(ctx):
-    if ctx.guild.id in current_songs:
-        title = current_songs[ctx.guild.id]
-        try:
-            # Şarkı adını temizle
-            title = title.split('(')[0]  # Parantez içindeki kısımları kaldır
-            title = title.split('[')[0]  # Köşeli parantez içindeki kısımları kaldır
-            title = title.split('feat.')[0]  # feat. kısmını kaldır
-            title = title.split('ft.')[0]  # ft. kısmını kaldır
-            title = title.split('Official')[0]  # Official kısmını kaldır
-            title = title.split('Music')[0]  # Music kısmını kaldır
-            title = title.split('Video')[0]  # Video kısmını kaldır
-            title = title.strip()  # Baştaki ve sondaki boşlukları kaldır
-            
-            # Genius'ta ara
-            song = genius.search_song(title)
-            if song:
-                lyrics = song.lyrics
-                # Şarkı sözlerini parçalara böl (Discord mesaj limiti)
-                chunks = [lyrics[i:i+1900] for i in range(0, len(lyrics), 1900)]
-                
-                # İlk embed'e şarkı bilgilerini ekle
-                first_embed = discord.Embed(
-                    title=f"🎵 {song.title}",
-                    description=chunks[0],
-                    color=discord.Color.blue()
-                )
-                first_embed.set_author(name=song.artist)
-                if song.song_art_image_url:
-                    first_embed.set_thumbnail(url=song.song_art_image_url)
-                await ctx.send(embed=first_embed)
-                
-                # Diğer parçaları gönder
-                for chunk in chunks[1:]:
-                    embed = discord.Embed(description=chunk, color=discord.Color.blue())
-                    await ctx.send(embed=embed)
-            else:
-                await ctx.send("❌ Şarkı sözleri bulunamadı!")
-        except Exception as e:
-            print(f"Lyrics error: {str(e)}")  # Hata detayını konsola yazdır
-            await ctx.send(f"❌ Şarkı sözleri alınırken bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
-    else:
-        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
 
 @bot.hybrid_command(aliases=['eq', 'ekolayzır'], description="Ekolayzır ayarlarını göster ve düzenle")
 async def equalizer(ctx, action=None, *args):
