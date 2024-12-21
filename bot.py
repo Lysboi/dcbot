@@ -251,7 +251,7 @@ async def toggle_loop(ctx, mode=None):
             await ctx.send("🔁 Sıra döngüsü açıldı")
 
 # Şu an çalan şarkı bilgisi
-@bot.command(aliases=['now', 'şuan', 'playing', 'np'])
+@bot.hybrid_command(aliases=['now', 'şuan', 'playing', 'np'], description="Şu an çalan şarkıyı göster")
 async def now_playing(ctx):
     if ctx.guild.id in current_songs and ctx.voice_client and ctx.voice_client.is_playing():
         title = current_songs[ctx.guild.id]
@@ -361,7 +361,7 @@ async def dj(ctx, role: discord.Role = None):
             else:
                 await ctx.send("❌ DJ rolü zaten ayarlanmamış!")
     else:
-        await ctx.send("�� Bu komutu kullanmak için yönetici yetkisine sahip olmalısın!")
+        await ctx.send(" Bu komutu kullanmak için yönetici yetkisine sahip olmalısın!")
 
 @bot.command(aliases=['voteskip', 'oylageç'])
 async def vote_skip(ctx):
@@ -768,18 +768,6 @@ async def queue(ctx):
         await ctx.send(f"Sıradaki şarkılar:\n{queue_list}")
     else:
         await ctx.send("Sırada şarkı yok!")
-
-@bot.hybrid_command(aliases=['now', 'şuan', 'playing', 'np'], description="Şu an çalan şarkıyı göster")
-async def now_playing(ctx):
-    if ctx.guild.id in current_songs and ctx.voice_client and ctx.voice_client.is_playing():
-        title = current_songs[ctx.guild.id]
-        url = current_urls.get(ctx.guild.id, "URL bilgisi yok")
-        embed = discord.Embed(title="🎵 Şu an çalıyor", color=discord.Color.green())
-        embed.add_field(name="Şarkı", value=title, inline=False)
-        embed.add_field(name="Link", value=url, inline=False)
-        await ctx.send(embed=embed)
-    else:
-        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
 
 @bot.hybrid_command(aliases=['lyrics', 'sözler'], description="Çalan şarkının sözlerini göster")
 async def get_lyrics(ctx):
