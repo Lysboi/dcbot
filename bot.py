@@ -485,15 +485,15 @@ async def play_song(ctx, query):
         
         if guild_id in filters:
             if filters[guild_id].get("nightcore", False):
-                filter_options.append("aresample=48000*1.25")
+                filter_options.append("atempo=1.25")
             if filters[guild_id].get("8d", False):
-                filter_options.append("apulsator=hz=0.08")
+                filter_options.append("apulsator=hz=0.08:width=0.8")
             if filters[guild_id].get("vaporwave", False):
-                filter_options.append("aresample=48000*0.8")
+                filter_options.append("atempo=0.8")
 
         FFMPEG_OPTIONS = {
             'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'options': f'-vn -ar 48000 -ac 2 -f opus' + (f' -af "{",".join(filter_options)}"' if filter_options else '')
+            'options': '-vn -acodec libopus' + (f' -af "{",".join(filter_options)}"' if filter_options else '')
         }
 
         with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
