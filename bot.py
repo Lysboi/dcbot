@@ -47,59 +47,13 @@ bot = commands.Bot(command_prefix=['!', '.'], intents=intents)
 async def on_ready():
     print(f'Bot {bot.user} olarak giriş yaptı')
     
-    # Mevcut komutları sil
-    await bot.tree.sync()
+    try:
+        # Komutları senkronize et
+        synced = await bot.tree.sync()
+        print(f"{len(synced)} komut senkronize edildi!")
+    except Exception as e:
+        print(f"Komut senkronizasyonu hatası: {e}")
     
-    # Yeni komutları kaydet
-    commands = [
-        discord.app_commands.Command(
-            name="load",
-            description="Kaydedilmiş bir playlist'i yükle",
-            callback=load_playlist
-        ),
-        discord.app_commands.Command(
-            name="save",
-            description="Mevcut sırayı playlist olarak kaydet",
-            callback=save_playlist
-        ),
-        discord.app_commands.Command(
-            name="list",
-            description="Kaydedilmiş playlist'leri göster",
-            callback=list_playlists
-        ),
-        discord.app_commands.Command(
-            name="play",
-            description="Şarkı çal veya sıraya ekle",
-            callback=play
-        ),
-        discord.app_commands.Command(
-            name="queue",
-            description="Sıradaki şarkıları göster",
-            callback=queue
-        ),
-        discord.app_commands.Command(
-            name="now",
-            description="Şu an çalan şarkıyı göster",
-            callback=now_playing
-        ),
-        discord.app_commands.Command(
-            name="lyrics",
-            description="Çalan şarkının sözlerini göster",
-            callback=get_lyrics
-        ),
-        discord.app_commands.Command(
-            name="eq",
-            description="Ekolayzır ayarlarını göster ve düzenle",
-            callback=equalizer
-        )
-    ]
-    
-    # Komutları ekle
-    for command in commands:
-        bot.tree.add_command(command)
-    
-    await bot.tree.sync()
-    print('Komutlar kaydedildi!')
     print('Bot hazır!')
 
 # Playlist dosyasını yükle
@@ -332,16 +286,34 @@ async def load_playlist(ctx, name: str):
     -----------
     name: Yüklenecek playlist'in adı
     """
-    if ctx.guild.id in saved_playlists and name in saved_playlists[ctx.guild.id]:
-        if ctx.guild.id not in music_queues:
-            music_queues[ctx.guild.id] = deque()
-        playlist = saved_playlists[ctx.guild.id][name]
-        music_queues[ctx.guild.id].extend(playlist)
-        await ctx.send(f"✅ Playlist '{name}' yüklendi! {len(playlist)} şarkı sıraya eklendi.")
-        if not ctx.voice_client.is_playing():
-            await play_next(ctx)
-    else:
+    # Ses kanalı kontrolü
+    if ctx.author.voice is None:
+        await ctx.send("❌ Bir sesli kanalda değilsiniz!")
+        return
+    
+    # Playlist kontrolü
+    if ctx.guild.id not in saved_playlists or name not in saved_playlists[ctx.guild.id]:
         await ctx.send(f"❌ '{name}' adlı playlist bulunamadı!")
+        return
+    
+    # Ses kanalına bağlan
+    voice_channel = ctx.author.voice.channel
+    if ctx.voice_client is None:
+        await voice_channel.connect()
+    else:
+        await ctx.voice_client.move_to(voice_channel)
+    
+    # Playlist'i yükle
+    if ctx.guild.id not in music_queues:
+        music_queues[ctx.guild.id] = deque()
+    
+    playlist = saved_playlists[ctx.guild.id][name]
+    music_queues[ctx.guild.id].extend(playlist)
+    await ctx.send(f"✅ Playlist '{name}' yüklendi! {len(playlist)} şarkı sıraya eklendi.")
+    
+    # Şarkı çalmıyorsa başlat
+    if not ctx.voice_client.is_playing():
+        await play_next(ctx)
 
 @load_playlist.autocomplete('name')
 async def load_playlist_autocomplete(interaction: discord.Interaction, current: str):
@@ -541,7 +513,7 @@ class VolumeDropdown(discord.ui.Select):
             if interaction.guild.voice_client and interaction.guild.voice_client.source:
                 volume = int(self.values[0]) / 100
                 interaction.guild.voice_client.source.volume = volume
-                emoji = "🔇" if volume == 0 else "🔈" if volume < 0.4 else "🔉" if volume < 0.8 else "🔊"
+                emoji = "🔇" if volume == 0 else "���" if volume < 0.4 else "🔉" if volume < 0.8 else "🔊"
                 await interaction.response.send_message(f"{emoji} Ses seviyesi {int(volume * 100)}% olarak ayarlandı!", ephemeral=True)
             else:
                 await interaction.response.send_message("❌ Şu anda çalan bir şarkı yok!", ephemeral=True)
