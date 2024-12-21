@@ -332,7 +332,7 @@ async def force_skip(ctx):
         ctx.voice_client.stop()
         await ctx.send("⏭️ Şarkı geçildi!")
     else:
-        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
+        await ctx.send("❌ Şu anda ��alan bir şarkı yok!")
 
 async def get_spotify_tracks(url):
     tracks = []
@@ -442,7 +442,7 @@ class VolumeDropdown(discord.ui.Select):
             discord.SelectOption(label="100%", emoji="🔊", value="100"),
             discord.SelectOption(label="120%", emoji="🔊", value="120"),
             discord.SelectOption(label="150%", emoji="🔊", value="150"),
-            discord.SelectOption(label="200%", emoji="🔊", value="200")
+            discord.SelectOption(label="200%", emoji="����", value="200")
         ]
         super().__init__(placeholder="Ses Seviyesi", options=options, custom_id="volume_select")
 
@@ -997,20 +997,41 @@ class GainSelect(discord.ui.Select):
 
             # Şarkıyı güncelle
             if view.ctx.voice_client and view.ctx.voice_client.is_playing():
-                current_title = current_songs[guild_id]
-                # Mevcut pozisyonu kaydet
-                current_position = view.ctx.voice_client.source.original._packet_iterator.tell()
-                # Şarkıyı duraklat
-                view.ctx.voice_client.pause()
-                # Yeni ses kaynağı oluştur
-                new_source = await create_source(view.ctx, f"ytsearch:{current_title}")
-                if new_source:
-                    # Yeni kaynağı ayarla
-                    view.ctx.voice_client.source = new_source
-                    # Pozisyonu ayarla
-                    view.ctx.voice_client.source.original._packet_iterator.seek(current_position)
-                    # Şarkıyı devam ettir
-                    view.ctx.voice_client.resume()
+                try:
+                    current_title = current_songs[guild_id]
+                    # Şarkıyı duraklat
+                    view.ctx.voice_client.pause()
+                    
+                    try:
+                        # Mevcut pozisyonu kaydet
+                        current_position = view.ctx.voice_client.source.original._packet_iterator.tell()
+                    except:
+                        current_position = 0
+                    
+                    # Yeni ses kaynağı oluştur
+                    new_source = await create_source(view.ctx, f"ytsearch:{current_title}")
+                    if new_source:
+                        try:
+                            # Yeni kaynağı ayarla
+                            view.ctx.voice_client.source = new_source
+                            # Pozisyonu ayarla (hata olursa atla)
+                            try:
+                                view.ctx.voice_client.source.original._packet_iterator.seek(current_position)
+                            except:
+                                pass
+                            # Şarkıyı devam ettir
+                            view.ctx.voice_client.resume()
+                        except Exception as e:
+                            print(f"Error updating source: {str(e)}")
+                            # Hata durumunda orijinal şarkıyı devam ettir
+                            view.ctx.voice_client.resume()
+                            raise
+                except Exception as e:
+                    print(f"Error in playback update: {str(e)}")
+                    # Herhangi bir hata durumunda şarkıyı devam ettir
+                    if view.ctx.voice_client and view.ctx.voice_client.is_paused():
+                        view.ctx.voice_client.resume()
+                    raise
 
             # Görsel ekolayzır göster
             eq_visual = "```\n"
@@ -1026,7 +1047,7 @@ class GainSelect(discord.ui.Select):
 
         except Exception as e:
             print(f"Error updating equalizer: {str(e)}")
-            await interaction.response.send_message("❌ Ekolayzır güncellenirken bir hata oluştu!", ephemeral=True)
+            await interaction.response.send_message("❌ Ekolayzır güncellenirken bir hata oluştu! Lütfen tekrar deneyin.", ephemeral=True)
             # Hata durumunda şarkıyı devam ettir
             if view.ctx.voice_client and view.ctx.voice_client.is_paused():
                 view.ctx.voice_client.resume()
