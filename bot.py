@@ -211,7 +211,7 @@ async def get_lyrics(ctx):
             song = genius.search_song(title)
             if song:
                 lyrics = song.lyrics
-                # Şarkı s��zlerini parçalara böl (Discord mesaj limiti)
+                # Şarkı sözlerini parçalara böl (Discord mesaj limiti)
                 chunks = [lyrics[i:i+1900] for i in range(0, len(lyrics), 1900)]
                 
                 # İlk embed'e şarkı bilgilerini ekle
@@ -440,7 +440,7 @@ class VolumeDropdown(discord.ui.Select):
             discord.SelectOption(label="60%", emoji="🔉", value="60"),
             discord.SelectOption(label="80%", emoji="🔊", value="80"),
             discord.SelectOption(label="100%", emoji="🔊", value="100"),
-            discord.SelectOption(label="120%", emoji="🔊", value="120"),
+            discord.SelectOption(label="120%", emoji="���", value="120"),
             discord.SelectOption(label="150%", emoji="🔊", value="150"),
             discord.SelectOption(label="200%", emoji="🔊", value="200")
         ]
@@ -482,13 +482,15 @@ async def play_next(ctx):
 async def play_song(ctx, query):
     try:
         YDL_OPTIONS = {
-            'format': 'bestaudio',
+            'format': 'bestaudio/best',
             'noplaylist': True,
             'nocheckcertificate': True,
             'quiet': True,
             'no_warnings': True,
             'default_search': 'ytsearch',
-            'source_address': '0.0.0.0'
+            'source_address': '0.0.0.0',
+            'preferredcodec': 'opus',
+            'preferredquality': '192'
         }
 
         # Ekolayzır ayarlarını uygula
@@ -501,7 +503,7 @@ async def play_song(ctx, query):
 
         FFMPEG_OPTIONS = {
             'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'options': '-vn -acodec libopus' + (f' -af "{",".join(filter_options)}"' if filter_options else '')
+            'options': '-vn -acodec libopus -b:a 192k -ar 48000 -ac 2'
         }
 
         with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
@@ -693,43 +695,25 @@ async def equalizer(ctx, action=None, *args):
     guild_id = ctx.guild.id
     
     if action is None:
-        # Mevcut ayarları ve komutları göster
-        embed = discord.Embed(title="🎛️ Ekolayzır Ayarları", color=discord.Color.blue())
+        # Ekolayzır UI'ı göster
+        view = EqualizerUI(ctx)
         
-        # Aktif ayarlar
-        current_settings = equalizer_settings.get(guild_id, "default")
-        if isinstance(current_settings, str):
-            current = f"Aktif Preset: {current_settings}"
-        else:
-            current = "Özel ayarlar aktif"
-        embed.add_field(name="Mevcut Durum", value=current, inline=False)
+        # Mevcut ayarları göster
+        eq_visual = "```\n"
+        freqs = ["32", "64", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"]
+        for f in freqs:
+            gain = 0
+            if guild_id in equalizer_settings and isinstance(equalizer_settings[guild_id], dict):
+                gain = equalizer_settings[guild_id].get(f, 0)
+            bars = "█" * int((gain + 20) / 2)
+            spaces = " " * (20 - len(bars))
+            eq_visual += f"{f:>4} Hz: {bars}{spaces} {gain:>3}dB\n"
+        eq_visual += "```"
         
-        # Komutlar
-        commands = """
-        `!eq preset <ad>` - Kayıtlı preset'i kullan
-        `!eq default` - Varsayılan ayarlara dön
-        `!eq set <frekans> <gain>` - Manuel ayar (ör: !eq set 100 5)
-        `!eq save <ad>` - Mevcut ayarları preset olarak kaydet
-        `!eq list` - Kayıtlı presetleri listele
-        `!eq clear` - Tüm efektleri kaldır
+        embed = discord.Embed(title="🎛️ Ekolayzır Ayarları", description=eq_visual, color=discord.Color.blue())
+        embed.add_field(name="Kullanım", value="Frekans ve gain değerlerini seçerek ekolayzırı ayarlayabilirsiniz.", inline=False)
         
-        Frekans aralıkları:
-        • 32, 64, 125, 250, 500, 1k, 2k, 4k, 8k, 16k
-        Gain aralığı: -20 ile +20 arası
-        """
-        embed.add_field(name="Komutlar", value=commands, inline=False)
-        
-        # Varsayılan presetler
-        presets = """
-        `!eq preset bass` - Bass boost
-        `!eq preset pop` - Pop müzik
-        `!eq preset rock` - Rock müzik
-        `!eq preset classical` - Klasik müzik
-        `!eq preset jazz` - Jazz müzik
-        """
-        embed.add_field(name="Varsayılan Presetler", value=presets, inline=False)
-        
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, view=view)
         return
     
     action = action.lower()
@@ -981,6 +965,117 @@ async def bass_boost(ctx, level="normal"):
         ctx.voice_client.stop()
         await play_song(ctx, f"ytsearch:{current_title}")
         await ctx.send(message)
+
+# Ekolayzır UI sınıfı
+class EqualizerUI(View):
+    def __init__(self, ctx):
+        super().__init__(timeout=None)
+        self.ctx = ctx
+        self.guild_id = ctx.guild.id
+        self.add_item(FrequencySelect())
+        self.add_item(GainSelect())
+        self.current_freq = None
+        self.current_gain = None
+
+class FrequencySelect(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="32 Hz", description="Sub Bass", value="32"),
+            discord.SelectOption(label="64 Hz", description="Bass", value="64"),
+            discord.SelectOption(label="125 Hz", description="Low-Mid", value="125"),
+            discord.SelectOption(label="250 Hz", description="Mid", value="250"),
+            discord.SelectOption(label="500 Hz", description="High-Mid", value="500"),
+            discord.SelectOption(label="1 kHz", description="Presence", value="1k"),
+            discord.SelectOption(label="2 kHz", description="Brilliance", value="2k"),
+            discord.SelectOption(label="4 kHz", description="Treble", value="4k"),
+            discord.SelectOption(label="8 kHz", description="High Treble", value="8k"),
+            discord.SelectOption(label="16 kHz", description="Air", value="16k")
+        ]
+        super().__init__(placeholder="Frekans Seç", options=options, custom_id="freq_select")
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        view.current_freq = self.values[0]
+        await interaction.response.send_message(f"🎛️ {self.values[0]}Hz frekansı seçildi. Şimdi gain değerini seçin.", ephemeral=True)
+
+class GainSelect(discord.ui.Select):
+    def __init__(self):
+        options = []
+        for gain in range(-20, 21, 2):
+            emoji = "🔊" if gain > 0 else "🔈" if gain < 0 else "⚪"
+            options.append(discord.SelectOption(label=f"{gain} dB", value=str(gain), emoji=emoji))
+        super().__init__(placeholder="Gain Değeri Seç", options=options, custom_id="gain_select")
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        if not view.current_freq:
+            await interaction.response.send_message("❌ Önce bir frekans seçmelisiniz!", ephemeral=True)
+            return
+
+        gain = float(self.values[0])
+        freq = view.current_freq
+        guild_id = view.guild_id
+
+        # Mevcut ayarları al veya yeni oluştur
+        if guild_id not in equalizer_settings or not isinstance(equalizer_settings[guild_id], dict):
+            equalizer_settings[guild_id] = {}
+
+        # Ayarı güncelle
+        equalizer_settings[guild_id][freq] = gain
+
+        # FFmpeg filtre stringini oluştur
+        filters = []
+        for f, g in equalizer_settings[guild_id].items():
+            f = f.replace("k", "000")  # 1k -> 1000
+            filters.append(f"equalizer=f={f}:t=h:w=100:g={g}")
+
+        equalizer_settings[guild_id] = ",".join(filters)
+
+        # Ses kaynağını güncelle
+        if view.ctx.voice_client and view.ctx.voice_client.is_playing():
+            current_title = current_songs[guild_id]
+            source = await create_source(view.ctx, current_title)
+            view.ctx.voice_client.source = source
+
+        # Görsel ekolayzır göster
+        eq_visual = "```\n"
+        freqs = ["32", "64", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"]
+        for f in freqs:
+            gain = equalizer_settings[guild_id].get(f, 0)
+            bars = "█" * int((gain + 20) / 2)
+            spaces = " " * (20 - len(bars))
+            eq_visual += f"{f:>4} Hz: {bars}{spaces} {gain:>3}dB\n"
+        eq_visual += "```"
+
+        await interaction.response.send_message(f"🎛️ Ekolayzır ayarları güncellendi:\n{eq_visual}", ephemeral=True)
+
+async def create_source(ctx, query):
+    """Ses kaynağı oluştur"""
+    try:
+        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+            info = ydl.extract_info(f"ytsearch:{query}" if not query.startswith('http') else query, download=False)
+            if 'entries' in info:
+                info = info['entries'][0]
+            url = info['url']
+
+            # Ekolayzır ayarlarını uygula
+            guild_id = ctx.guild.id
+            filter_options = []
+            
+            if guild_id in equalizer_settings:
+                if equalizer_settings[guild_id] != "default" and equalizer_settings[guild_id] is not None:
+                    filter_options.append(equalizer_settings[guild_id])
+
+            ffmpeg_options = FFMPEG_OPTIONS.copy()
+            if filter_options:
+                ffmpeg_options['options'] += f' -af "{",".join(filter_options)}"'
+
+            source = await discord.FFmpegOpusAudio.from_probe(url, **ffmpeg_options)
+            source.volume = 1.0
+            return source
+    except Exception as e:
+        print(f"Error creating source: {str(e)}")
+        return None
 
 # Botu çalıştır
 bot.run(TOKEN)
