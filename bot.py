@@ -6,11 +6,12 @@ import asyncio
 from collections import deque
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
-import json
+import os
 
-# Config dosyasını oku
-with open('config.json') as f:
-    config = json.load(f)
+# Environment variable'lardan bilgileri al
+TOKEN = os.getenv('TOKEN')
+SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
+SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
 
 # Spotify API kimlik bilgileri
 SPOTIFY_CLIENT_ID = config['SPOTIFY_CLIENT_ID']
