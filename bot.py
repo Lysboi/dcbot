@@ -479,7 +479,7 @@ class MusicControls(View):
         self.ctx = ctx
         self.volume = 100
 
-    @discord.ui.button(emoji="⏮���", style=discord.ButtonStyle.primary, custom_id="previous")
+    @discord.ui.button(emoji="⏮", style=discord.ButtonStyle.primary, custom_id="previous")
     async def previous_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message("Bu özellik yakında eklenecek!", ephemeral=True)
 
@@ -941,7 +941,7 @@ async def show_stats(ctx):
     await ctx.send(embed=embed)
 
 # Radyo komutları
-@bot.command(aliases=['radio', 'radyo'], description="Radyo istasyonunu çal")
+@bot.hybrid_command(aliases=['radio', 'radyo'], description="Radyo istasyonunu çal")
 async def play_radio(ctx, station: str = None):
     """
     Radyo istasyonunu çalar
@@ -1088,7 +1088,7 @@ class GainSelect(discord.ui.Select):
     def __init__(self):
         options = []
         for gain in range(-20, 21, 2):
-            emoji = "��" if gain > 0 else "🔈" if gain < 0 else "⚪"
+            emoji = "🔇" if gain > 0 else "🔈" if gain < 0 else "⚪"
             options.append(discord.SelectOption(label=f"{gain} dB", value=str(gain), emoji=emoji))
         super().__init__(placeholder="Gain Değeri Seç", options=options, custom_id="gain_select")
 
