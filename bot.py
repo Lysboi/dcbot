@@ -154,11 +154,31 @@ class VolumeDropdown(discord.ui.Select):
         super().__init__(placeholder="Ses Seviyesi", options=options, custom_id="volume_select")
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.guild.voice_client and interaction.guild.voice_client.source:
-            volume = int(self.values[0]) / 100
-            interaction.guild.voice_client.source.volume = volume
-            emoji = "🔇" if volume == 0 else "🔈" if volume < 0.4 else "🔉" if volume < 0.8 else "🔊"
-            await interaction.response.send_message(f"{emoji} Ses seviyesi {int(volume * 100)}% olarak ayarlandı!", ephemeral=True)
+        try:
+            if interaction.guild.voice_client and interaction.guild.voice_client.is_playing():
+                volume = int(self.values[0]) / 100
+                
+                # Mevcut şarkıyı durdur
+                interaction.guild.voice_client.stop()
+                
+                # Şarkıyı yeni ses seviyesiyle tekrar başlat
+                current_song = current_songs.get(interaction.guild.id)
+                if current_song:
+                    FFMPEG_OPTIONS = {
+                        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+                        'options': f'-vn -filter:a volume={volume}'
+                    }
+                    
+                    # Şarkıyı yeni ses seviyesiyle çal
+                    source = await discord.FFmpegOpusAudio.from_probe(current_song, **FFMPEG_OPTIONS)
+                    interaction.guild.voice_client.play(source)
+                
+                emoji = "🔇" if volume == 0 else "🔈" if volume < 0.4 else "🔉" if volume < 0.8 else "🔊"
+                await interaction.response.send_message(f"{emoji} Ses seviyesi {int(volume * 100)}% olarak ayarlandı!", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Şu anda çalan bir şarkı yok!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Ses seviyesi ayarlanırken bir hata oluştu: {str(e)}", ephemeral=True)
 
 @bot.event
 async def on_ready():
@@ -194,7 +214,8 @@ async def play_song(ctx, query):
         }
 
         FFMPEG_OPTIONS = {
-            'options': '-vn'
+            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+            'options': '-vn -filter:a volume=1.0'
         }
 
         with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
@@ -250,7 +271,7 @@ async def play_song(ctx, query):
         await ctx.send('❌ Şarkı çalınırken bir hata oluştu.')
 
 @bot.command()
-async def play(ctx, *, url):
+async def play(ctx, *, query):
     if ctx.author.voice is None:
         await ctx.send("Bir sesli kanalda değilsiniz!")
         return
@@ -262,59 +283,72 @@ async def play(ctx, *, url):
         await ctx.voice_client.move_to(voice_channel)
 
     try:
-        # Spotify URL'si kontrolü
-        if 'spotify.com' in url:
-            tracks = await get_spotify_tracks(url)
-            if tracks:
-                if len(tracks) > 1:
-                    await ctx.send(f"Spotify'dan {len(tracks)} şarkı ekleniyor...")
-                    
-                    if ctx.guild.id not in music_queues:
-                        music_queues[ctx.guild.id] = deque()
-                    
-                    for track in tracks:
-                        music_queues[ctx.guild.id].append(track)
-                    
-                    if not ctx.voice_client.is_playing():
-                        await play_next(ctx)
-                else:
-                    await play_song(ctx, tracks[0])
-            else:
-                await ctx.send("Spotify'dan şarkı bilgisi alınamadı!")
-            return
-
-        # YouTube playlist kontrolü
-        if 'playlist' in url:
-            YDL_OPTIONS = {
-                'format': 'bestaudio/best',
-                'extract_flat': True,
-                'quiet': True
-            }
-            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                try:
-                    info = ydl.extract_info(url, download=False)
-                    if 'entries' in info:
+        # URL kontrolü
+        if 'http' in query:
+            # Spotify URL'si kontrolü
+            if 'spotify.com' in query:
+                tracks = await get_spotify_tracks(query)
+                if tracks:
+                    if len(tracks) > 1:
+                        await ctx.send(f"Spotify'dan {len(tracks)} şarkı ekleniyor...")
+                        
                         if ctx.guild.id not in music_queues:
                             music_queues[ctx.guild.id] = deque()
                         
-                        for entry in info['entries']:
-                            video_url = f"https://www.youtube.com/watch?v={entry['id']}"
-                            music_queues[ctx.guild.id].append(video_url)
+                        for track in tracks:
+                            music_queues[ctx.guild.id].append(track)
                         
-                        await ctx.send(f"Playlist'e {len(info['entries'])} şarkı eklendi!")
                         if not ctx.voice_client.is_playing():
                             await play_next(ctx)
-                except Exception as e:
-                    await ctx.send(f'Playlist eklenirken bir hata oluştu: {str(e)}')
-        else:
-            # Tekli şarkı
+                    else:
+                        await play_song(ctx, tracks[0])
+                else:
+                    await ctx.send("Spotify'dan şarkı bilgisi alınamadı!")
+                return
+
+            # YouTube playlist kontrolü
+            if 'playlist' in query:
+                YDL_OPTIONS = {
+                    'format': 'bestaudio/best',
+                    'extract_flat': True,
+                    'quiet': True
+                }
+                with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                    try:
+                        info = ydl.extract_info(query, download=False)
+                        if 'entries' in info:
+                            if ctx.guild.id not in music_queues:
+                                music_queues[ctx.guild.id] = deque()
+                            
+                            for entry in info['entries']:
+                                video_url = f"https://www.youtube.com/watch?v={entry['id']}"
+                                music_queues[ctx.guild.id].append(video_url)
+                            
+                            await ctx.send(f"Playlist'e {len(info['entries'])} şarkı eklendi!")
+                            if not ctx.voice_client.is_playing():
+                                await play_next(ctx)
+                    except Exception as e:
+                        await ctx.send(f'Playlist eklenirken bir hata oluştu: {str(e)}')
+                return
+
+            # Tekli URL
             if ctx.voice_client.is_playing():
                 if ctx.guild.id not in music_queues:
                     music_queues[ctx.guild.id] = deque()
-                music_queues[ctx.guild.id].append(url)
+                music_queues[ctx.guild.id].append(query)
                 await ctx.send(f'Şarkı sıraya eklendi! Sırada {len(music_queues[ctx.guild.id])} şarkı var.')
             else:
-                await play_song(ctx, url)
+                await play_song(ctx, query)
+        else:
+            # Şarkı ismi ile arama
+            search_query = f"ytsearch:{query}"
+            if ctx.voice_client.is_playing():
+                if ctx.guild.id not in music_queues:
+                    music_queues[ctx.guild.id] = deque()
+                music_queues[ctx.guild.id].append(search_query)
+                await ctx.send(f'Şarkı sıraya eklendi! Sırada {len(music_queues[ctx.guild.id])} şarkı var.')
+            else:
+                await play_song(ctx, search_query)
     except Exception as e:
         await ctx.send(f'Bir hata oluştu: {str(e)}')
 
