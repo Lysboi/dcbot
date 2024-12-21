@@ -541,8 +541,20 @@ async def play_song(ctx, query):
                 if ctx.voice_client.is_playing():
                     ctx.voice_client.stop()
 
+                # After callback fonksiyonu
+                def after_callback(error):
+                    if error:
+                        print(f"Player error: {error}")
+                    
+                    # Şarkı bittiğinde çalışacak fonksiyon
+                    fut = asyncio.run_coroutine_threadsafe(after_song_end(ctx), bot.loop)
+                    try:
+                        fut.result()
+                    except Exception as e:
+                        print(f"Error in after_callback: {str(e)}")
+
                 # Yeni şarkıyı çal
-                ctx.voice_client.play(source)
+                ctx.voice_client.play(source, after=after_callback)
                 current_songs[ctx.guild.id] = title
                 current_urls[ctx.guild.id] = video_url  # Video URL'sini kaydet
 
@@ -557,6 +569,47 @@ async def play_song(ctx, query):
     except Exception as e:
         print(f"Error in play_song (outer): {str(e)}")
         await ctx.send('❌ Şarkı çalınırken bir hata oluştu.')
+
+async def after_song_end(ctx):
+    """Şarkı bittiğinde çalışacak fonksiyon"""
+    try:
+        guild_id = ctx.guild.id
+        
+        # Döngü modunu kontrol et
+        loop_mode = loop_modes.get(guild_id, "none")
+        
+        if loop_mode == "song" and guild_id in current_songs:
+            # Aynı şarkıyı tekrar çal
+            current_title = current_songs[guild_id]
+            await play_song(ctx, f"ytsearch:{current_title}")
+        
+        elif loop_mode == "queue" and guild_id in music_queues and music_queues[guild_id]:
+            # Çalan şarkıyı sıranın sonuna ekle
+            if guild_id in current_songs:
+                current_title = current_songs[guild_id]
+                music_queues[guild_id].append(f"ytsearch:{current_title}")
+            # Sıradaki şarkıyı çal
+            next_song = music_queues[guild_id].popleft()
+            await play_song(ctx, next_song)
+        
+        elif guild_id in music_queues and music_queues[guild_id]:
+            # Sıradaki şarkıyı çal
+            next_song = music_queues[guild_id].popleft()
+            await play_song(ctx, next_song)
+        
+        else:
+            # Sırada şarkı yoksa ve döngü kapalıysa current_songs'tan kaldır
+            if guild_id in current_songs:
+                del current_songs[guild_id]
+            if guild_id in current_urls:
+                del current_urls[guild_id]
+    
+    except Exception as e:
+        print(f"Error in after_song_end: {str(e)}")
+        if guild_id in current_songs:
+            del current_songs[guild_id]
+        if guild_id in current_urls:
+            del current_urls[guild_id]
 
 @bot.command()
 async def play(ctx, *, query):
@@ -928,7 +981,7 @@ async def bass_boost(ctx, level="normal"):
         await ctx.send("❌ Geçersiz seviye! Kullanılabilir seviyeler: off, low, normal, high")
         return
     
-    # Şarkıyı yeniden başlat
+    # Şarkıy�� yeniden başlat
     if ctx.guild.id in current_songs:
         current_title = current_songs[ctx.guild.id]
         ctx.voice_client.stop()
