@@ -200,7 +200,7 @@ async def play_song(ctx, query):
 
         FFMPEG_OPTIONS = {
             'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'options': '-vn -filter:a volume=1.0'
+            'options': '-vn'
         }
 
         with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
@@ -229,6 +229,7 @@ async def play_song(ctx, query):
 
                 # Ses kaynağını oluştur
                 source = await discord.FFmpegOpusAudio.from_probe(url, **FFMPEG_OPTIONS)
+                source.volume = 1.0  # Varsayılan ses seviyesi
 
                 # Önceki şarkıyı durdur
                 if ctx.voice_client.is_playing():
