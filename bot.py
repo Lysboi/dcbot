@@ -305,7 +305,7 @@ async def get_lyrics(ctx):
                 await ctx.send("❌ Şarkı sözleri bulunamadı!")
         except Exception as e:
             print(f"Lyrics error: {str(e)}")  # Hata detayını konsola yazdır
-            await ctx.send(f"❌ Şarkı sözleri alınırken bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
+            await ctx.send(f"❌ Şark�� sözleri alınırken bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
     else:
         await ctx.send("❌ Şu anda çalan bir şarkı yok!")
 
@@ -770,7 +770,7 @@ async def queue(ctx):
         await ctx.send("Sırada şarkı yok!")
 
 @bot.hybrid_command(aliases=['eq', 'ekolayzır'], description="Ekolayzır ayarlarını göster ve düzenle")
-async def equalizer(ctx, action=None, *args):
+async def equalizer(ctx, action: str = None, preset_name: str = None):
     if not ctx.voice_client or not ctx.voice_client.is_playing():
         await ctx.send("❌ Şu anda çalan bir şarkı yok!")
         return
@@ -809,12 +809,8 @@ async def equalizer(ctx, action=None, *args):
         equalizer_settings[guild_id] = None
         await restart_song(ctx, "🎛️ Tüm ekolayzır efektleri kaldırıldı!")
     
-    elif action == "preset":
-        if not args:
-            await ctx.send("❌ Preset adı belirtmelisiniz!")
-            return
-        
-        preset_name = args[0].lower()
+    elif action == "preset" and preset_name:
+        preset_name = preset_name.lower()
         
         # Varsayılan presetler
         default_presets = {
@@ -835,60 +831,6 @@ async def equalizer(ctx, action=None, *args):
             await restart_song(ctx, f"🎛️ '{preset_name}' preset'i uygulandı!")
         else:
             await ctx.send("❌ Böyle bir preset bulunamadı!")
-    
-    elif action == "set":
-        if len(args) != 2:
-            await ctx.send("❌ Frekans ve gain değerlerini belirtmelisiniz! Örnek: !eq set 100 5")
-            return
-        
-        try:
-            freq = args[0]
-            gain = float(args[1])
-            
-            if gain < -20 or gain > 20:
-                await ctx.send("❌ Gain değeri -20 ile +20 arasında olmalıdır!")
-                return
-            
-            # Frekans kontrolü
-            valid_freqs = {"32", "64", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"}
-            if freq not in valid_freqs:
-                await ctx.send("❌ Geçersiz frekans! Kullanılabilir frekanslar: 32, 64, 125, 250, 500, 1k, 2k, 4k, 8k, 16k")
-                return
-            
-            # Mevcut ayarları al veya yeni oluştur
-            if guild_id not in equalizer_settings or not isinstance(equalizer_settings[guild_id], dict):
-                equalizer_settings[guild_id] = {}
-            
-            # Ayarı güncelle
-            equalizer_settings[guild_id][freq] = gain
-            
-            # FFmpeg filtre stringini oluştur
-            filters = []
-            for f, g in equalizer_settings[guild_id].items():
-                f = f.replace("k", "000")  # 1k -> 1000
-                filters.append(f"equalizer=f={f}:t=h:w=100:g={g}")
-            
-            equalizer_settings[guild_id] = ",".join(filters)
-            await restart_song(ctx, f"🎛️ {freq}Hz frekansı {gain}dB olarak ayarlandı!")
-            
-        except ValueError:
-            await ctx.send("❌ Geçersiz gain değeri! Sayısal bir değer giriniz.")
-    
-    elif action == "save":
-        if not args:
-            await ctx.send("❌ Preset adı belirtmelisiniz!")
-            return
-        
-        preset_name = args[0].lower()
-        if guild_id not in equalizer_presets:
-            equalizer_presets[guild_id] = {}
-        
-        current_settings = equalizer_settings.get(guild_id)
-        if current_settings:
-            equalizer_presets[guild_id][preset_name] = current_settings
-            await ctx.send(f"✅ Mevcut ayarlar '{preset_name}' olarak kaydedildi!")
-        else:
-            await ctx.send("❌ Kaydedilecek aktif bir ayar yok!")
     
     elif action == "list":
         embed = discord.Embed(title="📋 Kayıtlı Ekolayzır Presetleri", color=discord.Color.blue())
