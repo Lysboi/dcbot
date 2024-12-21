@@ -503,7 +503,7 @@ async def play_song(ctx, query):
 
         FFMPEG_OPTIONS = {
             'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'options': '-vn -acodec libopus -b:a 192k -ar 48000 -ac 2'
+            'options': '-vn -c:a libopus -b:a 192k -ar 48000 -ac 2' + (f' -af "{",".join(filter_options)}"' if filter_options else '')
         }
 
         with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
@@ -523,24 +523,10 @@ async def play_song(ctx, query):
                 # Şarkı bilgilerini al
                 title = info.get('title', 'Bilinmeyen şarkı')
                 url = info.get('url')
-                video_id = info.get('id')
-                duration = info.get('duration', 0)
                 
                 if not url:
                     await ctx.send("❌ Şarkı URL'si alınamadı!")
                     return
-
-                # İstatistikleri güncelle
-                if guild_id not in stats:
-                    stats[guild_id] = {
-                        "total_songs": 0,
-                        "total_time": 0,
-                        "favorite_songs": {}
-                    }
-                
-                stats[guild_id]["total_songs"] += 1
-                stats[guild_id]["total_time"] += duration
-                stats[guild_id]["favorite_songs"][title] = stats[guild_id]["favorite_songs"].get(title, 0) + 1
 
                 # Ses kaynağını oluştur
                 source = await discord.FFmpegOpusAudio.from_probe(url, **FFMPEG_OPTIONS)
@@ -551,30 +537,7 @@ async def play_song(ctx, query):
                     ctx.voice_client.stop()
 
                 # Yeni şarkıyı çal
-                def after_playing(error):
-                    async def next_song():
-                        if error:
-                            print(f'Oynatma hatası: {error}')
-                        
-                        if ctx.guild.id in autoplay_enabled and autoplay_enabled[ctx.guild.id]:
-                            # Benzer şarkıları al
-                            try:
-                                related_url = f"https://www.youtube.com/watch?v={video_id}"
-                                with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
-                                    info = ydl.extract_info(related_url, download=False)
-                                    if info.get('related_videos'):
-                                        next_video = random.choice(info['related_videos'])
-                                        next_url = f"https://www.youtube.com/watch?v={next_video['id']}"
-                                        asyncio.create_task(play_song(ctx, next_url))
-                                        return
-                            except Exception as e:
-                                print(f"Autoplay error: {str(e)}")
-                        
-                        await play_next(ctx)
-                    
-                    asyncio.run_coroutine_threadsafe(next_song(), bot.loop)
-
-                ctx.voice_client.play(source, after=after_playing)
+                ctx.voice_client.play(source)
                 current_songs[ctx.guild.id] = title
 
                 # Kontrol butonlarını göster
@@ -1012,52 +975,61 @@ class GainSelect(discord.ui.Select):
             await interaction.response.send_message("❌ Önce bir frekans seçmelisiniz!", ephemeral=True)
             return
 
-        gain = float(self.values[0])
-        freq = view.current_freq
-        guild_id = view.guild_id
-
-        # Mevcut ayarları al veya yeni oluştur
-        if guild_id not in equalizer_settings or not isinstance(equalizer_settings[guild_id], dict):
-            equalizer_settings[guild_id] = {}
-
-        # Ayarı güncelle
-        equalizer_settings[guild_id][freq] = gain
-
-        # FFmpeg filtre stringini oluştur
-        filters = []
-        for f, g in equalizer_settings[guild_id].items():
-            f = f.replace("k", "000")  # 1k -> 1000
-            filters.append(f"equalizer=f={f}:t=h:w=100:g={g}")
-
-        equalizer_settings[guild_id] = ",".join(filters)
-
         try:
-            # Ses kaynağını güncelle
+            gain = float(self.values[0])
+            freq = view.current_freq
+            guild_id = view.guild_id
+
+            # Mevcut ayarları al veya yeni oluştur
+            if guild_id not in equalizer_settings or not isinstance(equalizer_settings[guild_id], dict):
+                equalizer_settings[guild_id] = {}
+
+            # Ayarı güncelle
+            equalizer_settings[guild_id][freq] = gain
+
+            # FFmpeg filtre stringini oluştur
+            filters = []
+            for f, g in equalizer_settings[guild_id].items():
+                f = f.replace("k", "000")  # 1k -> 1000
+                filters.append(f"equalizer=f={f}:t=h:w=100:g={g}")
+
+            equalizer_settings[guild_id] = ",".join(filters)
+
+            # Şarkıyı güncelle
             if view.ctx.voice_client and view.ctx.voice_client.is_playing():
                 current_title = current_songs[guild_id]
-                new_source = await create_source(view.ctx, current_title)
+                # Mevcut pozisyonu kaydet
+                current_position = view.ctx.voice_client.source.original._packet_iterator.tell()
+                # Şarkıyı duraklat
+                view.ctx.voice_client.pause()
+                # Yeni ses kaynağı oluştur
+                new_source = await create_source(view.ctx, f"ytsearch:{current_title}")
                 if new_source:
-                    # Mevcut pozisyonu kaydet
-                    current_position = view.ctx.voice_client.source.original.read()
+                    # Yeni kaynağı ayarla
                     view.ctx.voice_client.source = new_source
-                else:
-                    await interaction.response.send_message("❌ Ses kaynağı güncellenirken bir hata oluştu!", ephemeral=True)
-                    return
+                    # Pozisyonu ayarla
+                    view.ctx.voice_client.source.original._packet_iterator.seek(current_position)
+                    # Şarkıyı devam ettir
+                    view.ctx.voice_client.resume()
 
             # Görsel ekolayzır göster
             eq_visual = "```\n"
             freqs = ["32", "64", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"]
             for f in freqs:
-                gain = equalizer_settings[guild_id].get(f, 0)
-                bars = "█" * int((gain + 20) / 2)
+                current_gain = equalizer_settings[guild_id].get(f, 0) if isinstance(equalizer_settings[guild_id], dict) else 0
+                bars = "█" * int((current_gain + 20) / 2)
                 spaces = " " * (20 - len(bars))
-                eq_visual += f"{f:>4} Hz: {bars}{spaces} {gain:>3}dB\n"
+                eq_visual += f"{f:>4} Hz: {bars}{spaces} {current_gain:>3}dB\n"
             eq_visual += "```"
 
-            await interaction.response.send_message(f"🎛️ Ekolayzır ayarları güncellendi:\n{eq_visual}", ephemeral=True)
+            await interaction.response.send_message(f"🎛️ {freq}Hz frekansı {gain}dB olarak ayarlandı!\n{eq_visual}", ephemeral=True)
+
         except Exception as e:
             print(f"Error updating equalizer: {str(e)}")
             await interaction.response.send_message("❌ Ekolayzır güncellenirken bir hata oluştu!", ephemeral=True)
+            # Hata durumunda şarkıyı devam ettir
+            if view.ctx.voice_client and view.ctx.voice_client.is_paused():
+                view.ctx.voice_client.resume()
 
 async def create_source(ctx, query):
     """Ses kaynağı oluştur"""
