@@ -49,10 +49,22 @@ loop_modes = {}  # none, song, queue
 saved_playlists = {}
 dj_roles = {}
 
-# Ses filtrelerini ve otomatik özellikleri tutacak sözlükler
-filters = {}  # nightcore, 8d, vaporwave
-autoplay_enabled = {}  # autoplay durumu
-autodj_enabled = {}  # autodj durumu
+# Ekolayzır ayarlarını tutacak sözlükler
+equalizer_settings = {}  # Aktif ekolayzır ayarları
+equalizer_presets = {}  # Kayıtlı ekolayzır presetleri
+
+# Yeni sözlükler
+stats = {}  # İstatistikler
+radio_stations = {
+    "powerturk": "https://listen.powerapp.com.tr/powerturk/mpeg/icecast.audio",
+    "power": "https://listen.powerapp.com.tr/powerfm/mpeg/icecast.audio",
+    "slowturk": "https://radyo.duhnet.tv/ak_dtvh_slowturk",
+    "fenomen": "https://live.radyofenomen.com/fenomen/128/icecast.audio",
+    "kral": "https://dygedge.radyotvonline.net/kralpop/playlist.m3u8",
+    "virgin": "https://playerservices.streamtheworld.com/api/livestream-redirect/VIRGIN_RADIOAAC.aac",
+    "joyturk": "https://playerservices.streamtheworld.com/api/livestream-redirect/JOY_TURK.mp3",
+    "metro": "https://playerservices.streamtheworld.com/api/livestream-redirect/METRO_FM.mp3"
+}
 
 # Yardım komutu
 @bot.command(aliases=['yardım', 'y', 'komutlar'])
@@ -199,7 +211,7 @@ async def get_lyrics(ctx):
             song = genius.search_song(title)
             if song:
                 lyrics = song.lyrics
-                # Şarkı sözlerini parçalara böl (Discord mesaj limiti)
+                # Şarkı s��zlerini parçalara böl (Discord mesaj limiti)
                 chunks = [lyrics[i:i+1900] for i in range(0, len(lyrics), 1900)]
                 
                 # İlk embed'e şarkı bilgilerini ekle
@@ -479,17 +491,13 @@ async def play_song(ctx, query):
             'source_address': '0.0.0.0'
         }
 
-        # Ses filtrelerini uygula
+        # Ekolayzır ayarlarını uygula
         guild_id = ctx.guild.id
         filter_options = []
         
-        if guild_id in filters:
-            if filters[guild_id].get("nightcore", False):
-                filter_options.append("atempo=1.25")
-            if filters[guild_id].get("8d", False):
-                filter_options.append("apulsator=hz=0.08:width=0.8")
-            if filters[guild_id].get("vaporwave", False):
-                filter_options.append("atempo=0.8")
+        if guild_id in equalizer_settings:
+            if equalizer_settings[guild_id] != "default" and equalizer_settings[guild_id] is not None:
+                filter_options.append(equalizer_settings[guild_id])
 
         FFMPEG_OPTIONS = {
             'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
@@ -514,10 +522,23 @@ async def play_song(ctx, query):
                 title = info.get('title', 'Bilinmeyen şarkı')
                 url = info.get('url')
                 video_id = info.get('id')
+                duration = info.get('duration', 0)
                 
                 if not url:
                     await ctx.send("❌ Şarkı URL'si alınamadı!")
                     return
+
+                # İstatistikleri güncelle
+                if guild_id not in stats:
+                    stats[guild_id] = {
+                        "total_songs": 0,
+                        "total_time": 0,
+                        "favorite_songs": {}
+                    }
+                
+                stats[guild_id]["total_songs"] += 1
+                stats[guild_id]["total_time"] += duration
+                stats[guild_id]["favorite_songs"][title] = stats[guild_id]["favorite_songs"].get(title, 0) + 1
 
                 # Ses kaynağını oluştur
                 source = await discord.FFmpegOpusAudio.from_probe(url, **FFMPEG_OPTIONS)
@@ -662,111 +683,304 @@ async def clear(ctx):
         music_queues[ctx.guild.id].clear()
         await ctx.send("Sıra temizlendi!")
 
-# Ses filtreleri
-@bot.command(aliases=['nightcore', 'nc'])
-async def nightcore_filter(ctx):
+# Ekolayzır komutları
+@bot.command(aliases=['eq', 'ekolayzır'])
+async def equalizer(ctx, action=None, *args):
     if not ctx.voice_client or not ctx.voice_client.is_playing():
         await ctx.send("❌ Şu anda çalan bir şarkı yok!")
         return
     
     guild_id = ctx.guild.id
-    if guild_id not in filters:
-        filters[guild_id] = {"nightcore": False, "8d": False, "vaporwave": False}
     
-    filters[guild_id]["nightcore"] = not filters[guild_id]["nightcore"]
-    
-    # Şarkıyı yeniden başlat
-    if ctx.guild.id in current_songs:
-        current_title = current_songs[ctx.guild.id]
-        ctx.voice_client.stop()
-        await play_song(ctx, f"ytsearch:{current_title}")
+    if action is None:
+        # Mevcut ayarları ve komutları göster
+        embed = discord.Embed(title="🎛️ Ekolayzır Ayarları", color=discord.Color.blue())
         
-        if filters[guild_id]["nightcore"]:
-            await ctx.send("🎵 Nightcore modu açıldı!")
+        # Aktif ayarlar
+        current_settings = equalizer_settings.get(guild_id, "default")
+        if isinstance(current_settings, str):
+            current = f"Aktif Preset: {current_settings}"
         else:
-            await ctx.send("🎵 Nightcore modu kapatıldı!")
-
-@bot.command(aliases=['8d'])
-async def eight_d_filter(ctx):
-    if not ctx.voice_client or not ctx.voice_client.is_playing():
-        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
+            current = "Özel ayarlar aktif"
+        embed.add_field(name="Mevcut Durum", value=current, inline=False)
+        
+        # Komutlar
+        commands = """
+        `!eq preset <ad>` - Kayıtlı preset'i kullan
+        `!eq default` - Varsayılan ayarlara dön
+        `!eq set <frekans> <gain>` - Manuel ayar (ör: !eq set 100 5)
+        `!eq save <ad>` - Mevcut ayarları preset olarak kaydet
+        `!eq list` - Kayıtlı presetleri listele
+        `!eq clear` - Tüm efektleri kaldır
+        
+        Frekans aralıkları:
+        • 32, 64, 125, 250, 500, 1k, 2k, 4k, 8k, 16k
+        Gain aralığı: -20 ile +20 arası
+        """
+        embed.add_field(name="Komutlar", value=commands, inline=False)
+        
+        # Varsayılan presetler
+        presets = """
+        `!eq preset bass` - Bass boost
+        `!eq preset pop` - Pop müzik
+        `!eq preset rock` - Rock müzik
+        `!eq preset classical` - Klasik müzik
+        `!eq preset jazz` - Jazz müzik
+        """
+        embed.add_field(name="Varsayılan Presetler", value=presets, inline=False)
+        
+        await ctx.send(embed=embed)
         return
     
-    guild_id = ctx.guild.id
-    if guild_id not in filters:
-        filters[guild_id] = {"nightcore": False, "8d": False, "vaporwave": False}
+    action = action.lower()
     
-    filters[guild_id]["8d"] = not filters[guild_id]["8d"]
+    if action == "default":
+        equalizer_settings[guild_id] = "default"
+        await restart_song(ctx, "🎛️ Ekolayzır varsayılan ayarlara döndü!")
     
-    # Şarkıyı yeniden başlat
-    if ctx.guild.id in current_songs:
-        current_title = current_songs[ctx.guild.id]
-        ctx.voice_client.stop()
-        await play_song(ctx, f"ytsearch:{current_title}")
+    elif action == "clear":
+        equalizer_settings[guild_id] = None
+        await restart_song(ctx, "🎛️ Tüm ekolayzır efektleri kaldırıldı!")
+    
+    elif action == "preset":
+        if not args:
+            await ctx.send("❌ Preset adı belirtmelisiniz!")
+            return
         
-        if filters[guild_id]["8d"]:
-            await ctx.send("🎵 8D ses modu açıldı!")
-        else:
-            await ctx.send("🎵 8D ses modu kapatıldı!")
-
-@bot.command(aliases=['vaporwave', 'vw'])
-async def vaporwave_filter(ctx):
-    if not ctx.voice_client or not ctx.voice_client.is_playing():
-        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
-        return
-    
-    guild_id = ctx.guild.id
-    if guild_id not in filters:
-        filters[guild_id] = {"nightcore": False, "8d": False, "vaporwave": False}
-    
-    filters[guild_id]["vaporwave"] = not filters[guild_id]["vaporwave"]
-    
-    # Şarkıyı yeniden başlat
-    if ctx.guild.id in current_songs:
-        current_title = current_songs[ctx.guild.id]
-        ctx.voice_client.stop()
-        await play_song(ctx, f"ytsearch:{current_title}")
+        preset_name = args[0].lower()
         
-        if filters[guild_id]["vaporwave"]:
-            await ctx.send("🎵 Vaporwave modu açıldı!")
+        # Varsayılan presetler
+        default_presets = {
+            "bass": "bass=g=10,equalizer=f=40:t=h:w=100:g=10",
+            "pop": "equalizer=f=1000:t=h:w=200:g=3,equalizer=f=3000:t=h:w=200:g=2",
+            "rock": "equalizer=f=60:t=h:w=100:g=5,equalizer=f=3000:t=h:w=100:g=3",
+            "classical": "equalizer=f=500:t=h:w=100:g=2,equalizer=f=4000:t=h:w=100:g=3",
+            "jazz": "equalizer=f=100:t=h:w=100:g=3,equalizer=f=8000:t=h:w=100:g=2"
+        }
+        
+        # Önce kayıtlı presetlere bak
+        if guild_id in equalizer_presets and preset_name in equalizer_presets[guild_id]:
+            equalizer_settings[guild_id] = equalizer_presets[guild_id][preset_name]
+            await restart_song(ctx, f"🎛️ '{preset_name}' preset'i uygulandı!")
+        # Sonra varsayılan presetlere bak
+        elif preset_name in default_presets:
+            equalizer_settings[guild_id] = default_presets[preset_name]
+            await restart_song(ctx, f"🎛️ '{preset_name}' preset'i uygulandı!")
         else:
-            await ctx.send("🎵 Vaporwave modu kapatıldı!")
-
-# Otomatik özellikler
-@bot.command(aliases=['autoplay', 'otomatik'])
-async def toggle_autoplay(ctx):
-    guild_id = ctx.guild.id
-    autoplay_enabled[guild_id] = not autoplay_enabled.get(guild_id, False)
+            await ctx.send("❌ Böyle bir preset bulunamadı!")
     
-    if autoplay_enabled[guild_id]:
-        await ctx.send("🎵 Otomatik çalma modu açıldı! Şarkı bitince benzer şarkılar çalınacak.")
+    elif action == "set":
+        if len(args) != 2:
+            await ctx.send("❌ Frekans ve gain değerlerini belirtmelisiniz! Örnek: !eq set 100 5")
+            return
+        
+        try:
+            freq = args[0]
+            gain = float(args[1])
+            
+            if gain < -20 or gain > 20:
+                await ctx.send("❌ Gain değeri -20 ile +20 arasında olmalıdır!")
+                return
+            
+            # Frekans kontrolü
+            valid_freqs = {"32", "64", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"}
+            if freq not in valid_freqs:
+                await ctx.send("❌ Geçersiz frekans! Kullanılabilir frekanslar: 32, 64, 125, 250, 500, 1k, 2k, 4k, 8k, 16k")
+                return
+            
+            # Mevcut ayarları al veya yeni oluştur
+            if guild_id not in equalizer_settings or not isinstance(equalizer_settings[guild_id], dict):
+                equalizer_settings[guild_id] = {}
+            
+            # Ayarı güncelle
+            equalizer_settings[guild_id][freq] = gain
+            
+            # FFmpeg filtre stringini oluştur
+            filters = []
+            for f, g in equalizer_settings[guild_id].items():
+                f = f.replace("k", "000")  # 1k -> 1000
+                filters.append(f"equalizer=f={f}:t=h:w=100:g={g}")
+            
+            equalizer_settings[guild_id] = ",".join(filters)
+            await restart_song(ctx, f"🎛️ {freq}Hz frekansı {gain}dB olarak ayarlandı!")
+            
+        except ValueError:
+            await ctx.send("❌ Geçersiz gain değeri! Sayısal bir değer giriniz.")
+    
+    elif action == "save":
+        if not args:
+            await ctx.send("❌ Preset adı belirtmelisiniz!")
+            return
+        
+        preset_name = args[0].lower()
+        if guild_id not in equalizer_presets:
+            equalizer_presets[guild_id] = {}
+        
+        current_settings = equalizer_settings.get(guild_id)
+        if current_settings:
+            equalizer_presets[guild_id][preset_name] = current_settings
+            await ctx.send(f"✅ Mevcut ayarlar '{preset_name}' olarak kaydedildi!")
+        else:
+            await ctx.send("❌ Kaydedilecek aktif bir ayar yok!")
+    
+    elif action == "list":
+        embed = discord.Embed(title="📋 Kayıtlı Ekolayzır Presetleri", color=discord.Color.blue())
+        
+        # Varsayılan presetler
+        default_presets = "• bass\n• pop\n• rock\n• classical\n• jazz"
+        embed.add_field(name="Varsayılan Presetler", value=default_presets, inline=False)
+        
+        # Kullanıcı presetleri
+        if guild_id in equalizer_presets and equalizer_presets[guild_id]:
+            user_presets = "\n".join([f"• {name}" for name in equalizer_presets[guild_id].keys()])
+            embed.add_field(name="Kayıtlı Presetler", value=user_presets, inline=False)
+        else:
+            embed.add_field(name="Kayıtlı Presetler", value="Henüz kayıtlı preset yok", inline=False)
+        
+        await ctx.send(embed=embed)
+    
     else:
-        await ctx.send("🎵 Otomatik çalma modu kapatıldı!")
+        await ctx.send("❌ Geçersiz komut! Kullanılabilir komutları görmek için `!eq` yazın.")
 
-@bot.command(aliases=['autodj', 'djauto'])
-async def toggle_autodj(ctx):
+async def restart_song(ctx, message):
+    """Şarkıyı yeniden başlat ve mesaj gönder"""
+    if ctx.guild.id in current_songs:
+        current_title = current_songs[ctx.guild.id]
+        ctx.voice_client.stop()
+        await play_song(ctx, f"ytsearch:{current_title}")
+        await ctx.send(message)
+
+# İstatistik komutları
+@bot.command(aliases=['stats', 'istatistik'])
+async def show_stats(ctx):
     guild_id = ctx.guild.id
-    autodj_enabled[guild_id] = not autodj_enabled.get(guild_id, False)
+    if guild_id not in stats:
+        stats[guild_id] = {
+            "total_songs": 0,
+            "total_time": 0,
+            "favorite_songs": {}
+        }
     
-    if autodj_enabled[guild_id]:
-        await ctx.send("🎵 AutoDJ modu açıldı! Her 5 dakikada bir rastgele şarkı çalınacak.")
-        await auto_dj(ctx)
-    else:
-        await ctx.send("🎵 AutoDJ modu kapatıldı!")
+    embed = discord.Embed(title="📊 Bot İstatistikleri", color=discord.Color.blue())
+    
+    # Genel istatistikler
+    total_songs = stats[guild_id]["total_songs"]
+    total_time = stats[guild_id]["total_time"]
+    hours = total_time // 3600
+    minutes = (total_time % 3600) // 60
+    
+    general_stats = f"""
+    Toplam çalınan şarkı: {total_songs}
+    Toplam çalma süresi: {hours} saat {minutes} dakika
+    """
+    embed.add_field(name="Genel İstatistikler", value=general_stats, inline=False)
+    
+    # En çok çalınan şarkılar
+    if stats[guild_id]["favorite_songs"]:
+        top_songs = sorted(stats[guild_id]["favorite_songs"].items(), key=lambda x: x[1], reverse=True)[:5]
+        favorite_songs = "\n".join([f"{i+1}. {song} ({count} kez)" for i, (song, count) in enumerate(top_songs)])
+        embed.add_field(name="En Çok Çalınan Şarkılar", value=favorite_songs, inline=False)
+    
+    await ctx.send(embed=embed)
 
-async def auto_dj(ctx):
-    while autodj_enabled.get(ctx.guild.id, False):
-        if not ctx.voice_client or not ctx.voice_client.is_playing():
-            # Rastgele bir şarkı seç ve çal
-            random_songs = [
-                "ytsearch:pop hits 2023",
-                "ytsearch:rock classics",
-                "ytsearch:electronic dance music",
-                "ytsearch:hip hop hits",
-                "ytsearch:türkçe pop"
-            ]
-            await play_song(ctx, random.choice(random_songs))
-        await asyncio.sleep(300)  # 5 dakika bekle
+# Radyo komutları
+@bot.command(aliases=['radio', 'radyo'])
+async def play_radio(ctx, station=None):
+    if station is None:
+        # Radyo listesini göster
+        embed = discord.Embed(title="📻 Radyo İstasyonları", color=discord.Color.blue())
+        stations = "\n".join([f"`!radio {name}` - {name.title()}" for name in radio_stations.keys()])
+        embed.add_field(name="Kullanılabilir İstasyonlar", value=stations)
+        await ctx.send(embed=embed)
+        return
+    
+    station = station.lower()
+    if station not in radio_stations:
+        await ctx.send("❌ Geçersiz radyo istasyonu! Kullanılabilir istasyonlar için `!radio` yazın.")
+        return
+    
+    if ctx.author.voice is None:
+        await ctx.send("Bir sesli kanalda değilsiniz!")
+        return
+    
+    # Sesli kanala bağlan
+    voice_channel = ctx.author.voice.channel
+    if ctx.voice_client is None:
+        await voice_channel.connect()
+    else:
+        await ctx.voice_client.move_to(voice_channel)
+    
+    # Radyoyu çal
+    FFMPEG_OPTIONS = {
+        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+        'options': '-vn'
+    }
+    
+    url = radio_stations[station]
+    source = await discord.FFmpegOpusAudio.from_probe(url, **FFMPEG_OPTIONS)
+    
+    if ctx.voice_client.is_playing():
+        ctx.voice_client.stop()
+    
+    ctx.voice_client.play(source)
+    await ctx.send(f"📻 {station.title()} radyosu çalınıyor!")
+
+# Ses efektleri
+@bot.command(aliases=['echo', 'eko'])
+async def echo_effect(ctx):
+    if not ctx.voice_client or not ctx.voice_client.is_playing():
+        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
+        return
+    
+    guild_id = ctx.guild.id
+    if guild_id not in filters:
+        filters[guild_id] = {"echo": False}
+    
+    filters[guild_id]["echo"] = not filters[guild_id].get("echo", False)
+    
+    # Şarkıyı yeniden başlat
+    if ctx.guild.id in current_songs:
+        current_title = current_songs[ctx.guild.id]
+        ctx.voice_client.stop()
+        await play_song(ctx, f"ytsearch:{current_title}")
+        
+        if filters[guild_id]["echo"]:
+            await ctx.send("🎵 Eko efekti açıldı!")
+        else:
+            await ctx.send("🎵 Eko efekti kapatıldı!")
+
+@bot.command(aliases=['bass', 'bas'])
+async def bass_boost(ctx, level="normal"):
+    if not ctx.voice_client or not ctx.voice_client.is_playing():
+        await ctx.send("❌ Şu anda çalan bir şarkı yok!")
+        return
+    
+    guild_id = ctx.guild.id
+    if guild_id not in filters:
+        filters[guild_id] = {"bass": None}
+    
+    if level.lower() == "off":
+        filters[guild_id]["bass"] = None
+        message = "🎵 Bass boost kapatıldı!"
+    elif level.lower() == "low":
+        filters[guild_id]["bass"] = "bass=g=5"
+        message = "🎵 Bass boost düşük seviyeye ayarlandı!"
+    elif level.lower() == "normal":
+        filters[guild_id]["bass"] = "bass=g=10"
+        message = "🎵 Bass boost normal seviyeye ayarlandı!"
+    elif level.lower() == "high":
+        filters[guild_id]["bass"] = "bass=g=20"
+        message = "🎵 Bass boost yüksek seviyeye ayarlandı!"
+    else:
+        await ctx.send("❌ Geçersiz seviye! Kullanılabilir seviyeler: off, low, normal, high")
+        return
+    
+    # Şarkıyı yeniden başlat
+    if ctx.guild.id in current_songs:
+        current_title = current_songs[ctx.guild.id]
+        ctx.voice_client.stop()
+        await play_song(ctx, f"ytsearch:{current_title}")
+        await ctx.send(message)
 
 # Botu çalıştır
 bot.run(TOKEN)
