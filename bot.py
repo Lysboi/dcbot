@@ -513,7 +513,7 @@ class VolumeDropdown(discord.ui.Select):
             if interaction.guild.voice_client and interaction.guild.voice_client.source:
                 volume = int(self.values[0]) / 100
                 interaction.guild.voice_client.source.volume = volume
-                emoji = "🔇" if volume == 0 else "���" if volume < 0.4 else "🔉" if volume < 0.8 else "🔊"
+                emoji = "🔇" if volume == 0 else "🔈" if volume < 0.4 else "🔉" if volume < 0.8 else "🔊"
                 await interaction.response.send_message(f"{emoji} Ses seviyesi {int(volume * 100)}% olarak ayarlandı!", ephemeral=True)
             else:
                 await interaction.response.send_message("❌ Şu anda çalan bir şarkı yok!", ephemeral=True)
@@ -565,7 +565,7 @@ async def play_song(ctx, query):
 
         FFMPEG_OPTIONS = {
             'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'options': '-vn -c:a libopus -b:a 192k -ar 48000 -ac 2' + (f' -af "{",".join(filter_options)}"' if filter_options else '')
+            'options': '-vn' + (f' -af "{",".join(filter_options)}"' if filter_options else '')
         }
 
         with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
@@ -593,7 +593,6 @@ async def play_song(ctx, query):
 
                 # Ses kaynağını oluştur
                 source = await discord.FFmpegOpusAudio.from_probe(url, **FFMPEG_OPTIONS)
-                source.volume = 1.0
 
                 # Önceki şarkıyı durdur
                 if ctx.voice_client.is_playing():
@@ -656,7 +655,7 @@ async def after_song_end(ctx):
             await play_song(ctx, next_song)
         
         else:
-            # Sırada şarkı yoksa ve döngü kapalıysa current_songs'tan kaldır
+            # S��rada şarkı yoksa ve döngü kapalıysa current_songs'tan kaldır
             if guild_id in current_songs:
                 del current_songs[guild_id]
             if guild_id in current_urls:
